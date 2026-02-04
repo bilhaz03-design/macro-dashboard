@@ -77,6 +77,10 @@ export const snapshot = {
   "countries": [
     {
       "name": "Sweden",
+      "map": {
+        "lat": 60.1282,
+        "lon": 18.6435
+      },
       "subtitle": "Riksbank lead, krona sensitivity",
       "overall": "Neutral / slowing",
       "blocks": [
@@ -260,6 +264,10 @@ export const snapshot = {
     },
     {
       "name": "China",
+      "map": {
+        "lat": 35.8617,
+        "lon": 104.1954
+      },
       "subtitle": "Demand repair vs property drag",
       "overall": "Neutral / slowing",
       "blocks": [

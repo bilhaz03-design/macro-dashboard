@@ -107,6 +107,12 @@ export async function buildData() {
     riksText,
     /policy rate[^0-9]*([0-9.]+)\\s*per\\s*cent/i
   );
+  const swedenPmi =
+    extractNumber(swedenPmiText, /Manufacturing PMI[^0-9]*([0-9.]+)/i) ??
+    extractNumber(swedenPmiText, /PMI[^0-9]*([0-9.]+)/i);
+  const nierEti =
+    extractNumber(nierText, /Economic Tendency Indicator[^0-9]*([0-9.]+)/i) ??
+    extractNumber(nierText, /ETI[^0-9]*([0-9.]+)/i);
 
   // China parsing
   const retailDec = extractNumber(retailText, /up by\\s*([0-9.]+)%\\s*year on year/i);
@@ -114,8 +120,11 @@ export async function buildData() {
   const industryDec = extractNumber(industryText, /increased by\\s*([0-9.]+)\\s*percent/i);
   const industry2025 = extractNumber(industryText, /expanded\\s*([0-9.]+)\\s*percent year on year in 2025/i);
   const cpi = extractNumber(cpiText, /CPI[^0-9]*([0-9.]+)\\s*percent/i);
-  let property = extractNumber(propertyText, /real estate investment[^0-9-]*(-?[0-9.]+)%/i);
-  if (property != null && property > 0 && /declin|drop|fall/i.test(propertyText)) {
+  let property =
+    extractNumber(propertyText, /real estate investment[^0-9-]*(-?[0-9.]+)%/i) ??
+    extractNumber(propertyText, /real estate investment[^0-9-]*(-?[0-9.]+)\\s*percent/i) ??
+    extractNumber(propertyText, /real estate investment[^.]*?(-?[0-9.]+)\\s*%/i);
+  if (property != null && property > 0 && /declin|drop|fall|decrease|down/i.test(propertyText)) {
     property = -property;
   }
   const tsf = extractNumber(tsfText, /outstanding.*?([0-9.]+)\\s*percent/i);
