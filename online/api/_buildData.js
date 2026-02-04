@@ -194,7 +194,7 @@ export async function buildData() {
     countries: [
       {
         name: "Sweden",
-        map: { x: 52, y: 28 },
+        map: { lat: 60.1282, lon: 18.6435 },
         subtitle: "Riksbank lead, krona sensitivity",
         subtitle_sv: "Riksbanken leder, krona-känsligt",
         overall: "Neutral / slowing",
@@ -289,7 +289,7 @@ export async function buildData() {
       },
       {
         name: "China",
-        map: { x: 73, y: 45 },
+        map: { lat: 35.8617, lon: 104.1954 },
         subtitle: "Demand repair vs property drag",
         subtitle_sv: "Efterfrågereparation vs fastighetsbroms",
         overall: "Neutral / slowing",

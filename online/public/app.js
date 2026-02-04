@@ -395,11 +395,13 @@ function renderMap(countries) {
 
   countries.forEach((country) => {
     const point = country.map;
-    if (!point) return;
+    if (!point || point.lat == null || point.lon == null) return;
+    const x = ((point.lon + 180) / 360) * 100;
+    const y = ((90 - point.lat) / 180) * 100;
     const dot = document.createElement("div");
     dot.className = "map-dot";
-    dot.style.left = `${point.x}%`;
-    dot.style.top = `${point.y}%`;
+    dot.style.left = `${x}%`;
+    dot.style.top = `${y}%`;
     const status = getField(country, "overall");
     dot.style.background =
       status.includes("Strong") || status.includes("Går starkt") || status.includes("Ser bra")
@@ -412,8 +414,8 @@ function renderMap(countries) {
         country,
         "overall"
       )}`;
-      tooltip.style.left = `${point.x}%`;
-      tooltip.style.top = `${point.y}%`;
+      tooltip.style.left = `${x}%`;
+      tooltip.style.top = `${y}%`;
       tooltip.classList.add("show");
     });
     dot.addEventListener("mouseleave", () => {
@@ -421,8 +423,8 @@ function renderMap(countries) {
     });
     const label = document.createElement("div");
     label.className = "map-label";
-    label.style.left = `${point.x}%`;
-    label.style.top = `${point.y}%`;
+    label.style.left = `${x}%`;
+    label.style.top = `${y}%`;
     label.textContent = i18n[currentLang].countries[country.name] || country.name;
     map.appendChild(dot);
     map.appendChild(label);
