@@ -1,0 +1,393 @@
+export const snapshot = {
+  "last_updated": "2026-02-04",
+  "summary": [
+    {
+      "title": "Sweden",
+      "value": "Neutral / slowing",
+      "note": "Riksbank easing, labor soft, inflation near target.",
+      "status": "Neutral",
+      "sources": [
+        {
+          "label": "Riksbank",
+          "url": "https://www.riksbank.se/en-gb/statistics/"
+        },
+        {
+          "label": "SCB",
+          "url": "https://www.scb.se/"
+        }
+      ],
+      "value_sv": "Neutral / saktar till",
+      "note_sv": "Riksbanken l\u00e4ttar, arbetsmarknaden svag, inflation n\u00e4ra m\u00e5let.",
+      "status_sv": "Neutral"
+    },
+    {
+      "title": "China",
+      "value": "Neutral / slowing",
+      "note": "Property drag offsets industry; low inflation.",
+      "status": "Neutral",
+      "sources": [
+        {
+          "label": "NBS",
+          "url": "https://www.stats.gov.cn/english/"
+        },
+        {
+          "label": "PBOC",
+          "url": "https://www.pbc.gov.cn/en/"
+        }
+      ],
+      "value_sv": "Neutral / saktar till",
+      "note_sv": "Fastigheter tynger, industrin stabil, inflation l\u00e5g.",
+      "status_sv": "Neutral"
+    },
+    {
+      "title": "Global Risk",
+      "value": "No downgrade",
+      "note": "Global PMI mixed; USD stable.",
+      "status": "Neutral",
+      "sources": [
+        {
+          "label": "PMI",
+          "url": "https://www.spglobal.com/marketintelligence/en/news-insights/latest-news-headlines"
+        },
+        {
+          "label": "FRED",
+          "url": "https://fred.stlouisfed.org/"
+        }
+      ],
+      "value_sv": "Ingen nedgradering",
+      "note_sv": "PMI blandat; USD stabilt.",
+      "status_sv": "Neutral"
+    }
+  ],
+  "global_risk": {
+    "status": "Neutral",
+    "note": "Global PMI mixed; USD conditions stable. No downgrade applied.",
+    "sources": [
+      {
+        "label": "PMI",
+        "url": "https://www.spglobal.com/marketintelligence/en/news-insights/latest-news-headlines"
+      },
+      {
+        "label": "FRED",
+        "url": "https://fred.stlouisfed.org/"
+      }
+    ],
+    "note_sv": "PMI blandat; USD-f\u00f6rh\u00e5llanden stabila. Ingen nedgradering."
+  },
+  "countries": [
+    {
+      "name": "Sweden",
+      "subtitle": "Riksbank lead, krona sensitivity",
+      "overall": "Neutral / slowing",
+      "blocks": [
+        {
+          "label": "Central Bank",
+          "status": "Neutral",
+          "detail": "Policy rate 1.75% (effective 2026-02-04).",
+          "sources": [
+            {
+              "label": "Riksbank",
+              "url": "https://www.riksbank.se/en-gb/statistics/"
+            }
+          ],
+          "trend": [
+            1.75,
+            1.75,
+            1.75,
+            1.75
+          ],
+          "status_sv": "Neutral",
+          "detail_sv": "Styrr\u00e4nta 1,75% (g\u00e4ller 2026-02-04).",
+          "label_sv": "Riksbank"
+        },
+        {
+          "label": "Currency",
+          "status": "Neutral",
+          "detail": "EUR/SEK 10.5205 (2026-01-30).",
+          "sources": [
+            {
+              "label": "Riksbank FX",
+              "url": "https://www.riksbank.se/en-gb/statistics/"
+            }
+          ],
+          "trend": [
+            10.62,
+            10.55,
+            10.48,
+            10.52
+          ],
+          "status_sv": "Neutral",
+          "detail_sv": "EUR/SEK 10,5205 (2026-01-30).",
+          "label_sv": "Krona"
+        },
+        {
+          "label": "Inflation",
+          "status": "Good",
+          "detail": "CPIF 2.1% y/y; CPIF-XE 2.3% (Dec 2025).",
+          "sources": [
+            {
+              "label": "SCB CPI",
+              "url": "https://www.scb.se/en/finding-statistics/statistics-by-subject-area/prices-and-economic-trends/price-statistics/consumer-price-index-cpi/pong/statistical-news/consumer-price-index-cpi-december-2025/"
+            }
+          ],
+          "trend": [
+            3.0,
+            2.6,
+            2.3,
+            2.1
+          ],
+          "status_sv": "Bra",
+          "detail_sv": "KPIF 2,1% y/y; KPIF-XE 2,3% (dec 2025).",
+          "label_sv": "Inflation"
+        },
+        {
+          "label": "External Cycle",
+          "status": "Weak",
+          "detail": "Germany manufacturing PMI 49.1 (Jan 2026).",
+          "sources": [
+            {
+              "label": "Germany PMI",
+              "url": "https://www.trade.gov.tr/news/german-manufacturing-pmi-index-increased-to-49-1-in-january-2026"
+            }
+          ],
+          "trend": [
+            45.0,
+            47.2,
+            48.4,
+            49.1
+          ],
+          "status_sv": "Svag",
+          "detail_sv": "Tysk tillverknings-PMI 49,1 (jan 2026).",
+          "label_sv": "Extern cykel"
+        },
+        {
+          "label": "Soft Data",
+          "status": "Good",
+          "detail": "Sweden PMI 56.0; NIER ETI 103 (Jan 2026).",
+          "sources": [
+            {
+              "label": "PMI",
+              "url": "https://tradingeconomics.com/sweden/manufacturing-pmi"
+            },
+            {
+              "label": "NIER",
+              "url": "https://www.konj.se/english.html"
+            }
+          ],
+          "trend": [
+            50.5,
+            52.1,
+            54.3,
+            56.0
+          ],
+          "status_sv": "Bra",
+          "detail_sv": "Sverige PMI 56,0; NIER ETI 103 (jan 2026).",
+          "label_sv": "Mjuk data"
+        },
+        {
+          "label": "Housing & Credit",
+          "status": "Neutral",
+          "detail": "Household lending +2.9% y/y; floating mortgage 2.65% (Dec 2025).",
+          "sources": [
+            {
+              "label": "SCB Credit",
+              "url": "https://www.scb.se/en/finding-statistics/statistics-by-subject-area/financial-markets/financial-market-statistics/financial-market-statistics/pong/statistical-news/financial-market-statistics-december-2025/"
+            }
+          ],
+          "trend": [
+            3.2,
+            3.1,
+            3.0,
+            2.9
+          ],
+          "status_sv": "Neutral",
+          "detail_sv": "Hush\u00e5llsl\u00e5n +2,9% y/y; r\u00f6rlig bol\u00e5ner\u00e4nta 2,65% (dec 2025).",
+          "label_sv": "Bost\u00e4der & kredit"
+        },
+        {
+          "label": "Labor",
+          "status": "Weak",
+          "detail": "Unemployment 8.3% (SA 9.0%) in Dec 2025.",
+          "sources": [
+            {
+              "label": "SCB LFS",
+              "url": "https://www.scb.se/en/finding-statistics/statistics-by-subject-area/labour-market/labour-force-supply/labour-force-surveys-lfs/"
+            }
+          ],
+          "trend": [
+            7.6,
+            7.9,
+            8.1,
+            8.3
+          ],
+          "status_sv": "Svag",
+          "detail_sv": "Arbetsl\u00f6shet 8,3% (SA 9,0%) i dec 2025.",
+          "label_sv": "Arbetsmarknad"
+        },
+        {
+          "label": "Hard Data",
+          "status": "Neutral",
+          "detail": "GDP indicator -0.6% m/m; Q4 +0.2% q/q; Dec +0.9% y/y.",
+          "sources": [
+            {
+              "label": "SCB GDP",
+              "url": "https://www.scb.se/en/finding-statistics/statistics-by-subject-area/national-accounts/ovrigt/national-accounts-other/pong/statistical-news/national-accounts-monthly-gdp-indicator-december-2025/"
+            }
+          ],
+          "trend": [
+            1.8,
+            1.5,
+            1.2,
+            0.9
+          ],
+          "status_sv": "Neutral",
+          "detail_sv": "BNP-indikator -0,6% m/m; Q4 +0,2% q/q; dec +0,9% y/y.",
+          "label_sv": "H\u00e5rd data"
+        }
+      ],
+      "timeline": [
+        "Signal: Riksbank path",
+        "Lead: EUR/SEK",
+        "Confirm: retail & GDP"
+      ],
+      "subtitle_sv": "Riksbanken leder, krona-k\u00e4nsligt",
+      "overall_sv": "Neutral / saktar till",
+      "timeline_sv": [
+        "Signal: Riksbankens bana",
+        "Ledande: EUR/SEK",
+        "Bekr\u00e4fta: detaljhandel & BNP"
+      ]
+    },
+    {
+      "name": "China",
+      "subtitle": "Demand repair vs property drag",
+      "overall": "Neutral / slowing",
+      "blocks": [
+        {
+          "label": "Consumption",
+          "status": "Neutral",
+          "detail": "Retail sales +0.9% y/y (Dec); 2025 +3.7%.",
+          "sources": [
+            {
+              "label": "NBS",
+              "url": "https://www.stats.gov.cn/english/PressRelease/202601/t20260120_1962354.html"
+            }
+          ],
+          "trend": [
+            2.1,
+            1.6,
+            1.2,
+            0.9
+          ],
+          "status_sv": "Neutral",
+          "detail_sv": "Detaljhandel +0,9% y/y (dec); 2025 +3,7%.",
+          "label_sv": "Konsumtion"
+        },
+        {
+          "label": "Industry",
+          "status": "Neutral",
+          "detail": "Industrial output +5.2% y/y (Dec); 2025 +5.9%.",
+          "sources": [
+            {
+              "label": "NBS",
+              "url": "https://english.www.gov.cn/archive/statistics/202601/19/content_WS696da6eec6d00ca5f9a08a2f.html"
+            }
+          ],
+          "trend": [
+            4.8,
+            5.0,
+            5.4,
+            5.2
+          ],
+          "status_sv": "Neutral",
+          "detail_sv": "Industriproduktion +5,2% y/y (dec); 2025 +5,9%.",
+          "label_sv": "Industri"
+        },
+        {
+          "label": "Property",
+          "status": "Weak",
+          "detail": "Real estate investment -17.2% y/y in 2025.",
+          "sources": [
+            {
+              "label": "NBS",
+              "url": "https://www.china.org.cn/2026-01/19/content_118287661.shtml"
+            }
+          ],
+          "trend": [
+            -13.9,
+            -15.6,
+            -16.7,
+            -17.2
+          ],
+          "status_sv": "Svag",
+          "detail_sv": "Fastighetsinvesteringar -17,2% y/y under 2025.",
+          "label_sv": "Fastigheter"
+        },
+        {
+          "label": "Credit",
+          "status": "Neutral",
+          "detail": "AFRE (TSF) outstanding +8.5% y/y (end-Nov).",
+          "sources": [
+            {
+              "label": "PBOC",
+              "url": "https://xining.pbc.gov.cn/en/3688247/3688978/3709137/2025122410193371772/index.html"
+            }
+          ],
+          "trend": [
+            9.2,
+            8.9,
+            8.7,
+            8.5
+          ],
+          "status_sv": "Neutral",
+          "detail_sv": "TSF utest\u00e5ende +8,5% y/y (slutet av nov).",
+          "label_sv": "Kredit"
+        },
+        {
+          "label": "Inflation",
+          "status": "Neutral",
+          "detail": "CPI +0.8% y/y; +0.2% m/m (Dec).",
+          "sources": [
+            {
+              "label": "NBS",
+              "url": "https://www.stats.gov.cn/english/PressRelease/202601/t20260112_1962292.html"
+            }
+          ],
+          "trend": [
+            0.3,
+            0.5,
+            0.6,
+            0.8
+          ],
+          "status_sv": "Neutral",
+          "detail_sv": "CPI +0,8% y/y; +0,2% m/m (dec).",
+          "label_sv": "Inflation"
+        }
+      ],
+      "timeline": [
+        "Signal: policy + credit",
+        "Lead: consumption",
+        "Confirm: property + exports"
+      ],
+      "subtitle_sv": "Efterfr\u00e5gereparation vs fastighetsbroms",
+      "overall_sv": "Neutral / saktar till",
+      "timeline_sv": [
+        "Signal: policy + kredit",
+        "Ledande: konsumtion",
+        "Bekr\u00e4fta: fastigheter + export"
+      ]
+    }
+  ],
+  "signal_score": {
+    "value": "61",
+    "note": "Moderate momentum, uneven by country"
+  },
+  "system_status": {
+    "label": "Neutral / slowing",
+    "note": "Macro signals mixed",
+    "summary": "Sweden shows softer labor but inflation near target and easing policy; China remains capped by property weakness despite steady industry. Net signal is neutral with pockets of stabilization.",
+    "label_sv": "Neutral / saktar till",
+    "note_sv": "Makrosignaler blandade",
+    "summary_sv": "Sverige har svagare arbetsmarknad men inflation n\u00e4ra m\u00e5let och l\u00e4ttare policy; Kina h\u00e5lls tillbaka av svag fastighetssektor trots stabil industri. Totalsignalen \u00e4r neutral med tecken p\u00e5 stabilisering."
+  }
+};
