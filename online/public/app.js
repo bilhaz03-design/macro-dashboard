@@ -369,15 +369,36 @@ function renderMap(countries) {
   map.innerHTML = "";
   const globe = document.createElement("div");
   globe.className = "globe";
-  const sphere = document.createElement("div");
-  sphere.className = "globe-sphere";
-  const texture = document.createElement("div");
-  texture.className = "globe-texture";
-  sphere.appendChild(texture);
-  const atmosphere = document.createElement("div");
-  atmosphere.className = "globe-atmosphere";
-  globe.appendChild(sphere);
-  globe.appendChild(atmosphere);
+  globe.innerHTML = `
+    <svg class="globe-svg" viewBox="0 0 200 100" aria-hidden="true">
+      <defs>
+        <clipPath id="globeClip">
+          <circle cx="100" cy="50" r="50" />
+        </clipPath>
+        <radialGradient id="globeShade" cx="30%" cy="35%" r="70%">
+          <stop offset="0%" stop-color="rgba(255,255,255,0.35)" />
+          <stop offset="55%" stop-color="rgba(0,0,0,0.0)" />
+          <stop offset="100%" stop-color="rgba(0,0,0,0.55)" />
+        </radialGradient>
+      </defs>
+      <g clip-path="url(#globeClip)">
+        <rect class="globe-ocean" x="0" y="0" width="200" height="100" />
+        <g class="globe-band">
+          <g class="globe-continents" id="continents">
+            <path d="M20 35c8-6 18-8 26-3 5 3 8 8 6 13-2 6-9 8-16 8-10 0-20-5-23-10-2-3-1-6 7-8z" />
+            <path d="M60 60c6-5 14-6 22-2 6 3 10 8 7 12-3 5-10 7-17 6-9-1-18-6-19-10-1-3 2-5 7-6z" />
+            <path d="M95 30c10-6 23-7 32-2 6 3 9 8 7 12-3 7-13 10-23 9-12-1-22-7-23-12-1-4 3-6 7-7z" />
+            <path d="M120 58c8-5 19-6 27-1 5 3 8 7 6 11-3 5-10 7-18 7-10 0-20-5-22-10-2-3 1-5 7-7z" />
+            <path d="M150 25c7-4 16-5 23-1 4 2 6 6 4 9-3 4-8 6-15 6-9 0-16-4-18-8-1-2 2-4 6-6z" />
+            <path d="M160 70c6-4 14-5 20-2 4 2 6 6 4 9-3 4-9 5-15 4-7-1-13-4-14-7-1-3 1-4 5-4z" />
+          </g>
+          <use href="#continents" x="200" />
+        </g>
+      </g>
+      <circle class="globe-shade" cx="95" cy="50" r="50" />
+      <circle class="globe-atmosphere" cx="100" cy="50" r="51" />
+    </svg>
+  `;
   map.appendChild(globe);
   const tooltip = document.createElement("div");
   tooltip.className = "map-tooltip";
