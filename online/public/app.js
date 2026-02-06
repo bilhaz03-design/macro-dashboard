@@ -367,6 +367,18 @@ function renderMap(countries) {
   const map = document.getElementById("global-map");
   if (!map) return;
   map.innerHTML = "";
+  const globe = document.createElement("div");
+  globe.className = "globe";
+  const sphere = document.createElement("div");
+  sphere.className = "globe-sphere";
+  const texture = document.createElement("div");
+  texture.className = "globe-texture";
+  sphere.appendChild(texture);
+  const atmosphere = document.createElement("div");
+  atmosphere.className = "globe-atmosphere";
+  globe.appendChild(sphere);
+  globe.appendChild(atmosphere);
+  map.appendChild(globe);
   const tooltip = document.createElement("div");
   tooltip.className = "map-tooltip";
   map.appendChild(tooltip);

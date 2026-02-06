@@ -387,10 +387,7 @@ h1 {
   position: relative;
   height: 260px;
   border-radius: 999px;
-  background:
-    radial-gradient(circle at 30% 35%, rgba(78, 178, 255, 0.45), transparent 40%),
-    radial-gradient(circle at 65% 70%, rgba(0, 86, 140, 0.7), transparent 50%),
-    radial-gradient(circle at 50% 50%, #0b3a60 0%, #0a2a4a 55%, #081f38 100%);
+  background: #061a2b;
   border: 1px solid rgba(60, 120, 170, 0.45);
   overflow: hidden;
   box-shadow:
@@ -398,29 +395,54 @@ h1 {
     inset 0 0 30px rgba(255, 255, 255, 0.08);
 }
 
-.map::before {
-  content: "";
+.globe {
   position: absolute;
-  inset: 0;
-  background-image:
-    radial-gradient(circle at 20% 55%, rgba(34, 112, 76, 0.6), transparent 38%),
-    radial-gradient(circle at 55% 45%, rgba(46, 128, 84, 0.6), transparent 35%),
-    radial-gradient(circle at 75% 30%, rgba(40, 122, 78, 0.55), transparent 30%),
-    radial-gradient(circle at 35% 25%, rgba(40, 122, 78, 0.5), transparent 30%),
-    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
-  background-size: auto, auto, auto, auto, 28px 28px, 28px 28px;
-  opacity: 0.75;
-  mix-blend-mode: screen;
+  inset: 8px;
+  border-radius: 50%;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 30% 35%, rgba(78, 178, 255, 0.35), transparent 45%),
+    radial-gradient(circle at 70% 70%, rgba(0, 86, 140, 0.7), transparent 55%),
+    radial-gradient(circle at 50% 50%, #0b3a60 0%, #0a2a4a 55%, #081f38 100%);
+  box-shadow:
+    inset 0 0 40px rgba(255, 255, 255, 0.08),
+    inset -18px -20px 30px rgba(0, 0, 0, 0.45);
 }
 
-.map::after {
-  content: "";
+.globe-sphere {
   position: absolute;
   inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.globe-texture {
+  position: absolute;
+  inset: -5%;
+  border-radius: 50%;
+  background-image:
+    radial-gradient(circle at 18% 55%, rgba(46, 128, 84, 0.9) 0 12%, transparent 14%),
+    radial-gradient(circle at 36% 38%, rgba(40, 122, 78, 0.85) 0 10%, transparent 12%),
+    radial-gradient(circle at 60% 55%, rgba(40, 122, 78, 0.85) 0 12%, transparent 14%),
+    radial-gradient(circle at 78% 36%, rgba(34, 112, 76, 0.8) 0 10%, transparent 12%),
+    radial-gradient(circle at 28% 70%, rgba(34, 112, 76, 0.75) 0 10%, transparent 12%),
+    linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+  background-size: 200% 100%, 200% 100%, 200% 100%, 200% 100%, 200% 100%, 32px 32px, 32px 32px;
+  background-position: 0% 50%, 20% 35%, 60% 55%, 80% 30%, 25% 72%, 0 0, 0 0;
+  animation: globe-rotate 16s linear infinite;
+  mix-blend-mode: screen;
+  opacity: 0.9;
+  filter: saturate(1.05);
+}
+
+.globe-atmosphere {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
   background:
-    radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.35), transparent 55%),
-    radial-gradient(circle at 70% 70%, rgba(0, 140, 255, 0.25), transparent 60%);
+    radial-gradient(circle at 40% 35%, rgba(255, 255, 255, 0.45), transparent 60%),
+    radial-gradient(circle at 70% 70%, rgba(0, 140, 255, 0.3), transparent 65%);
   pointer-events: none;
 }
 
@@ -489,6 +511,29 @@ h1 {
 
 .map-tooltip.show {
   opacity: 1;
+}
+
+@keyframes globe-rotate {
+  from {
+    background-position:
+      0% 50%,
+      20% 35%,
+      60% 55%,
+      80% 30%,
+      25% 72%,
+      0 0,
+      0 0;
+  }
+  to {
+    background-position:
+      100% 50%,
+      120% 35%,
+      160% 55%,
+      180% 30%,
+      125% 72%,
+      0 0,
+      0 0;
+  }
 }
 
 @keyframes pulse {
