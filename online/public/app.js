@@ -27,7 +27,7 @@ const i18n = {
       "Advanced, clean, and readable. Built for weekly updates and fast decision context.",
     excelLink: "Open Excel Dashboard",
     updateButton: "Update Data",
-    updateCopied: "Update command copied. Run in Terminal.",
+    updateCopied: "Data refreshed.",
     lastUpdated: "Last updated",
     executiveSummary: "Executive Summary",
     globalRisk: "Global Risk Filter",
@@ -63,7 +63,7 @@ const i18n = {
       "Avancerad, ren och lättläst. Byggd för veckouppdateringar och snabb beslutsöverblick.",
     excelLink: "Öppna Excel‑dashboard",
     updateButton: "Uppdatera data",
-    updateCopied: "Uppdateringskommando kopierat. Kör i Terminal.",
+    updateCopied: "Data uppdaterad.",
     lastUpdated: "Senast uppdaterad",
     executiveSummary: "Sammanfattning",
     globalRisk: "Global riskfilter",
@@ -330,22 +330,18 @@ function setupUpdateButton() {
   if (!button) return;
   button.addEventListener("click", async () => {
     try {
-      const token = window.localStorage.getItem("updateToken") || prompt("Enter update token");
-      if (!token) return;
-      window.localStorage.setItem("updateToken", token);
-      const response = await fetch(`/api/update?token=${encodeURIComponent(token)}`);
-      if (response.ok) {
-        const data = await response.json();
-        window.__dashboardData = data;
-        renderDashboard(data);
-        button.textContent = currentLang === "sv" ? "Uppdaterad" : "Updated";
-        setTimeout(() => {
-          button.textContent = i18n[currentLang].updateButton;
-        }, 2000);
-        return;
-      }
+      const response = await fetch(`/api/data`);
+      if (!response.ok) throw new Error("Update failed");
+      const data = await response.json();
+      window.__dashboardData = data;
+      renderDashboard(data);
+      button.textContent = i18n[currentLang].updateCopied;
+      setTimeout(() => {
+        button.textContent = i18n[currentLang].updateButton;
+      }, 2000);
+      return;
     } catch (_err) {
-      // fall back to clipboard
+      // no-op
     }
     alert(currentLang === "sv" ? "Uppdatering misslyckades." : "Update failed.");
   });
