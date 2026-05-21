@@ -3,6 +3,11 @@ name: Swing Terminal Cloud Watchdog
 on:
   schedule:
     - cron: "28,58 7-21 * * 1-5"
+  workflow_run:
+    workflows:
+      - Swing Terminal Cloud Scanner
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       force:
