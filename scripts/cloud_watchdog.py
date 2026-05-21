@@ -117,7 +117,15 @@ def remember_heal_dispatch(state: dict, mode: str, now_utc: datetime) -> None:
     heal_state[mode] = now_utc.isoformat()
 
 
-def dispatch_github_scan(*, mode: str, repo: str, ref: str, token: str, no_notify: bool = False) -> dict:
+def dispatch_github_scan(
+    *,
+    mode: str,
+    repo: str,
+    ref: str,
+    token: str,
+    no_notify: bool = False,
+    force: bool = False,
+) -> dict:
     if mode not in ALLOWED_HEAL_MODES:
         raise ValueError(f"Unsupported heal mode: {mode}")
     if not token:
@@ -127,7 +135,7 @@ def dispatch_github_scan(*, mode: str, repo: str, ref: str, token: str, no_notif
         "ref": ref,
         "inputs": {
             "mode": mode,
-            "force": "false",
+            "force": "true" if force else "false",
             "no_notify": "true" if no_notify else "false",
         },
     }).encode("utf-8")
@@ -155,7 +163,7 @@ def dispatch_github_scan(*, mode: str, repo: str, ref: str, token: str, no_notif
 
     if status != 204:
         raise RuntimeError(f"GitHub dispatch failed: {status} {detail[:300]}")
-    return {"mode": mode, "workflow": "swing-terminal-cloud.yml", "http_status": status}
+    return {"mode": mode, "workflow": "swing-terminal-cloud.yml", "http_status": status, "force": force}
 
 
 def parse_expected_mode_specs(values: list[str]) -> list[tuple[str, int]]:
@@ -265,6 +273,7 @@ def run_watchdog(args: argparse.Namespace) -> int:
                     ref=args.github_ref,
                     token=os.environ.get(args.github_token_env, ""),
                     no_notify=args.no_notify,
+                    force=args.heal_force,
                 )
                 remember_heal_dispatch(state, mode, now_utc)
                 heal_results.append({**result, "status": "dispatched"})
@@ -327,6 +336,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dispatch-on-stale", action="store_true")
     parser.add_argument("--heal-mode", choices=["etf", "stocks", "all"], default="etf")
     parser.add_argument("--heal-cooldown-minutes", type=int, default=45)
+    parser.add_argument(
+        "--heal-force",
+        action="store_true",
+        help="Dispatch self-heal scanner runs with force=true; intended for manual smoke tests only.",
+    )
     parser.add_argument("--github-repo", default=os.environ.get("GITHUB_REPOSITORY", "bilhaz03-design/macro-dashboard"))
     parser.add_argument("--github-ref", default=os.environ.get("GITHUB_REF_NAME", "main"))
     parser.add_argument("--github-token-env", default="GITHUB_TOKEN")

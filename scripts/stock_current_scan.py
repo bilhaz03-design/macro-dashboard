@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,22 +16,28 @@ from stock_framework_deep_research import (  # noqa: E402
     CURRENT_OUT,
     add_features,
     current_events,
+    fetch_ohlcv_batch,
     fetch_ohlcv,
     signal_specs,
     universe,
 )
 
 COVERAGE_OUT = ROOT / "data" / "stock_framework_current_scan_coverage.json"
+CURRENT_SCAN_PERIOD = os.environ.get("SWING_TERMINAL_STOCK_CURRENT_PERIOD", "8y")
 
 
 def main() -> int:
     current: list[dict] = []
     coverage: list[dict] = []
     stocks = universe()
+    batch = fetch_ohlcv_batch([stock.ticker for stock in stocks], period=CURRENT_SCAN_PERIOD)
+    print(f"[stock_current_scan] batch period={CURRENT_SCAN_PERIOD} tickers={len(stocks)}", flush=True)
 
     for index, stock in enumerate(stocks, 1):
         print(f"[stock_current_scan] [{index:03d}/{len(stocks)}] {stock.ticker}", flush=True)
-        df = fetch_ohlcv(stock.ticker)
+        df = batch.get(stock.ticker)
+        if df is None:
+            df = fetch_ohlcv(stock.ticker, period=CURRENT_SCAN_PERIOD)
         if df is None or len(df) < 756:
             coverage.append({
                 "ticker": stock.ticker,
@@ -64,6 +71,7 @@ def main() -> int:
         json.dumps(
             {
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "period": CURRENT_SCAN_PERIOD,
                 "stocks": len(stocks),
                 "ok": sum(1 for row in coverage if row["status"] == "OK"),
                 "fail": sum(1 for row in coverage if row["status"] == "FAIL"),

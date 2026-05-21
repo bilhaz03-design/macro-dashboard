@@ -60,6 +60,7 @@ jobs:
           )
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             args+=(--force)
+            args+=(--heal-force)
           fi
           if [ "${{ github.event.inputs.no_notify }}" = "true" ]; then
             args+=(--no-notify)

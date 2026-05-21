@@ -43,6 +43,7 @@ FWD_DAYS = (5, 21, 63)
 CURRENT_LOOKBACK_BARS = 10
 BASELINE_ITERS = 1000
 CACHE_MAX_AGE_HOURS = float(os.environ.get("SWING_TERMINAL_STOCK_CACHE_MAX_AGE_HOURS", "6"))
+YFINANCE_TIMEOUT_SECONDS = float(os.environ.get("SWING_TERMINAL_YFINANCE_TIMEOUT_SECONDS", "15"))
 
 
 @dataclass(frozen=True)
@@ -187,9 +188,10 @@ def universe() -> tuple[Stock, ...]:
     return china_adr + hk + us + sweden + europe
 
 
-def cache_path(ticker: str) -> Path:
+def cache_path(ticker: str, period: str = "max") -> Path:
     safe = ticker.replace("/", "_").replace("^", "")
-    return CACHE_DIR / f"{safe}.csv"
+    suffix = "" if period == "max" else f".{period}"
+    return CACHE_DIR / f"{safe}{suffix}.csv"
 
 
 def cache_file_fresh(path: Path) -> bool:
@@ -200,17 +202,7 @@ def cache_file_fresh(path: Path) -> bool:
     return age_seconds <= CACHE_MAX_AGE_HOURS * 3600
 
 
-def fetch_ohlcv(ticker: str) -> pd.DataFrame | None:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = cache_path(ticker)
-    if path.exists():
-        try:
-            cached = pd.read_csv(path, parse_dates=["Date"]).set_index("Date")
-            if not cached.empty and cache_file_fresh(path):
-                return cached
-        except Exception:
-            pass
-    raw = yf.download(ticker, period="max", interval="1d", progress=False, auto_adjust=True, threads=False)
+def normalize_ohlcv(raw: pd.DataFrame | None) -> pd.DataFrame | None:
     if raw is None or raw.empty:
         return None
     if isinstance(raw.columns, pd.MultiIndex):
@@ -222,7 +214,96 @@ def fetch_ohlcv(ticker: str) -> pd.DataFrame | None:
     df = df[df["Volume"] > 0]
     df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
     df = df[~df.index.duplicated(keep="last")].sort_index()
-    df.to_csv(path, index_label="Date")
+    return None if df.empty else df
+
+
+def load_cached_ohlcv(ticker: str, period: str = "max") -> pd.DataFrame | None:
+    path = cache_path(ticker, period)
+    if not path.exists():
+        return None
+    try:
+        cached = pd.read_csv(path, parse_dates=["Date"]).set_index("Date")
+        if not cached.empty and cache_file_fresh(path):
+            return cached
+    except Exception:
+        return None
+    return None
+
+
+def save_cached_ohlcv(ticker: str, period: str, df: pd.DataFrame) -> None:
+    df.to_csv(cache_path(ticker, period), index_label="Date")
+
+
+def extract_batch_ticker(raw: pd.DataFrame, ticker: str) -> pd.DataFrame | None:
+    if raw is None or raw.empty:
+        return None
+    if isinstance(raw.columns, pd.MultiIndex):
+        first_level = raw.columns.get_level_values(0)
+        second_level = raw.columns.get_level_values(1)
+        if ticker in first_level:
+            return raw[ticker]
+        if ticker in second_level:
+            return raw.xs(ticker, axis=1, level=1)
+        return None
+    return raw
+
+
+def fetch_ohlcv_batch(tickers: list[str], *, period: str = "8y") -> dict[str, pd.DataFrame | None]:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    result: dict[str, pd.DataFrame | None] = {}
+    pending = []
+    for ticker in tickers:
+        cached = load_cached_ohlcv(ticker, period)
+        if cached is not None:
+            result[ticker] = cached
+        else:
+            pending.append(ticker)
+    if not pending:
+        return result
+
+    try:
+        raw = yf.download(
+            pending,
+            period=period,
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            threads=True,
+            group_by="ticker",
+            timeout=YFINANCE_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        raw = None
+
+    for ticker in pending:
+        df = normalize_ohlcv(extract_batch_ticker(raw, ticker) if raw is not None else None)
+        if df is not None:
+            save_cached_ohlcv(ticker, period, df)
+        result[ticker] = df
+    return result
+
+
+def fetch_ohlcv(ticker: str, *, period: str = "max") -> pd.DataFrame | None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cached = load_cached_ohlcv(ticker, period)
+    if cached is not None:
+        return cached
+    try:
+        raw = yf.download(
+            ticker,
+            period=period,
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            threads=False,
+            timeout=YFINANCE_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return None
+    df = normalize_ohlcv(raw)
+    if df is None:
+        return None
+    save_cached_ohlcv(ticker, period, df)
     return df
 
 

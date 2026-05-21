@@ -95,6 +95,38 @@ def test_dispatch_github_scan_keeps_lifecycle_status_separate():
         "mode": "etf",
         "workflow": "swing-terminal-cloud.yml",
         "http_status": 204,
+        "force": False,
     }
     request = urlopen.call_args.args[0]
     assert request.headers["Authorization"] == "Bearer token"
+
+
+def test_dispatch_github_scan_can_force_manual_self_heal():
+    class FakeResponse:
+        status = 204
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b""
+
+    with patch("urllib.request.urlopen", return_value=FakeResponse()) as urlopen:
+        result = cloud_watchdog.dispatch_github_scan(
+            mode="stocks",
+            repo="owner/repo",
+            ref="main",
+            token="token",
+            no_notify=True,
+            force=True,
+        )
+
+    assert result["force"] is True
+    request = urlopen.call_args.args[0]
+    body = request.data.decode("utf-8")
+    assert '"mode": "stocks"' in body
+    assert '"force": "true"' in body
+    assert '"no_notify": "true"' in body
