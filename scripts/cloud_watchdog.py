@@ -109,6 +109,17 @@ def should_dispatch_heal(state: dict, mode: str, now_utc: datetime, cooldown_min
     return now_utc - last_dispatch_at >= timedelta(minutes=cooldown_minutes)
 
 
+def heal_dispatch_allowed(
+    state: dict,
+    mode: str,
+    now_utc: datetime,
+    cooldown_minutes: int,
+    *,
+    force: bool = False,
+) -> bool:
+    return force or should_dispatch_heal(state, mode, now_utc, cooldown_minutes)
+
+
 def remember_heal_dispatch(state: dict, mode: str, now_utc: datetime) -> None:
     heal_state = state.get("last_heal_dispatch_at")
     if not isinstance(heal_state, dict):
@@ -263,7 +274,13 @@ def run_watchdog(args: argparse.Namespace) -> int:
     if args.dispatch_on_stale:
         for check in stale_checks:
             mode = check["mode"] if check["mode"] != "all" else args.heal_mode
-            if not should_dispatch_heal(state, mode, now_utc, args.heal_cooldown_minutes):
+            if not heal_dispatch_allowed(
+                state,
+                mode,
+                now_utc,
+                args.heal_cooldown_minutes,
+                force=args.heal_force,
+            ):
                 heal_results.append({"mode": mode, "status": "throttled"})
                 continue
             try:

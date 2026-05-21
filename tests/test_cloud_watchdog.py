@@ -62,6 +62,14 @@ def test_heal_dispatch_cooldown_is_per_mode():
     assert cloud_watchdog.should_dispatch_heal(state, "stocks", now, 45) is True
 
 
+def test_heal_force_bypasses_manual_smoke_cooldown():
+    now = datetime(2026, 5, 22, 10, 0, tzinfo=timezone.utc)
+    state = {"last_heal_dispatch_at": {"stocks": "2026-05-22T09:59:00+00:00"}}
+
+    assert cloud_watchdog.heal_dispatch_allowed(state, "stocks", now, 45) is False
+    assert cloud_watchdog.heal_dispatch_allowed(state, "stocks", now, 45, force=True) is True
+
+
 def test_parse_expected_mode_specs():
     assert cloud_watchdog.parse_expected_mode_specs(["etf:50", "stocks:130"]) == [
         ("etf", 50),
