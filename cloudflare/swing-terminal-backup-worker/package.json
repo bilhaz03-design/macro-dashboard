@@ -1,0 +1,9 @@
+{
+  "name": "swing-terminal-backup-clock",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/index.test.mjs",
+    "deploy": "wrangler deploy"
+  }
+}

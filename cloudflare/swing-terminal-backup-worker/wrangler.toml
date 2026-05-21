@@ -1,0 +1,14 @@
+name = "swing-terminal-backup-clock"
+main = "src/index.js"
+compatibility_date = "2026-05-22"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+GITHUB_REPO = "bilhaz03-design/macro-dashboard"
+GITHUB_REF = "main"
+ETF_STALE_MINUTES = "35"
+STOCKS_STALE_MINUTES = "90"
+ETF_THROTTLE_MINUTES = "25"
+STOCKS_THROTTLE_MINUTES = "60"
