@@ -1,0 +1,38 @@
+name: Swing Terminal Cloud Watchdog
+
+on:
+  schedule:
+    - cron: "13,43 7-21 * * 1-5"
+  workflow_dispatch:
+
+concurrency:
+  group: swing-terminal-watchdog-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_INGEST_TOKEN: ${{ secrets.SUPABASE_INGEST_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      SWING_TERMINAL_DASHBOARD_URL: ${{ secrets.SWING_TERMINAL_DASHBOARD_URL }}
+      SWING_TERMINAL_CLOUD_RUN: "1"
+      SWING_TERMINAL_ROOT: ${{ github.workspace }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check scanner heartbeat
+        run: python scripts/cloud_watchdog.py --max-age-minutes 50
