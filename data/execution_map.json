@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "mappings": {
+    "FLXC.DE": {
+      "name": "iShares MSCI China ETF USD Acc",
+      "broker": "Nordnet",
+      "market": "Xetra",
+      "reason": "Use ICGA as execution instrument when its displayed Nordnet/Xetra spread and depth are better than FLXC.DE for broad China PB126 exposure.",
+      "currency": "EUR",
+      "manual_checks": [
+        "spread_bps",
+        "displayed_depth",
+        "latest_fill_cost",
+        "isin_match_or_exposure_match"
+      ],
+      "execution_ticker": "ICGA",
+      "requires_manual_spread_check": true
+    }
+  },
+  "updated_at": "2026-05-21"
+}

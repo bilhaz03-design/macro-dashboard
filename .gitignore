@@ -7,3 +7,17 @@ output/
 *.command
 *.log
 /tmp/
+test-results/
+data/stock_cache/
+data/daily-scan-*.txt
+data/watchlist-*.md
+data/scanner.log
+data/scanner.err
+data/SCAN_ALERT.txt
+data/latest-signals.json
+data/signal-journal.json
+data/stock-signal-journal.json
+data/signal-notify-state.json
+data/live-trades.json
+data/stock_framework_current_scan_coverage.json
+data/stock_framework_deep_current_signals.json

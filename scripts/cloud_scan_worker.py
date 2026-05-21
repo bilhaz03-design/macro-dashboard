@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""Cloud runner for the swing terminal.
+
+Run this from Render Cron, a small VPS, or GitHub Actions. The critical pattern:
+
+1. Restore scanner memory from Supabase before running.
+2. Run the existing Python scanner locally in this process environment.
+3. Send Telegram/macOS-safe notifications.
+4. Publish fresh state back to Supabase.
+
+No broker order placement happens here.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, time
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+ROOT = Path(os.environ.get("SWING_TERMINAL_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DATA_DIR = ROOT / "data"
+
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import supabase_io  # noqa: E402
+from env_loader import load_default_env  # noqa: E402
+
+
+RESTORED_ARTIFACTS = {
+    "latest-signals": DATA_DIR / "latest-signals.json",
+    "signal-journal": DATA_DIR / "signal-journal.json",
+    "stock-signal-journal": DATA_DIR / "stock-signal-journal.json",
+    "signal-notify-state": DATA_DIR / "signal-notify-state.json",
+    "live-trades": DATA_DIR / "live-trades.json",
+    "execution-map": DATA_DIR / "execution_map.json",
+}
+
+PUBLISHED_JSON_ARTIFACTS = {
+    "latest-signals": ("latest_signals", DATA_DIR / "latest-signals.json"),
+    "signal-journal": ("signal_journal", DATA_DIR / "signal-journal.json"),
+    "stock-signal-journal": ("stock_signal_journal", DATA_DIR / "stock-signal-journal.json"),
+    "signal-notify-state": ("notify_state", DATA_DIR / "signal-notify-state.json"),
+    "live-trades": ("live_trades", DATA_DIR / "live-trades.json"),
+    "execution-map": ("execution_map", DATA_DIR / "execution_map.json"),
+    "stock-current-coverage": ("stock_current_coverage", DATA_DIR / "stock_framework_current_scan_coverage.json"),
+}
+
+PUBLISHED_TEXT_ARTIFACTS = {
+    "scan-data-js": ("scan_data_js", ROOT / "dashboard" / "scan_data.js"),
+    "stock-data-js": ("stock_data_js", ROOT / "dashboard" / "stock_data.js"),
+}
+
+
+def now_stockholm() -> datetime:
+    return datetime.now(ZoneInfo("Europe/Stockholm"))
+
+
+def in_stockholm_scan_window(dt: datetime) -> bool:
+    local = dt.astimezone(ZoneInfo("Europe/Stockholm"))
+    if local.weekday() >= 5:
+        return False
+    return time(9, 0) <= local.time() <= time(22, 15)
+
+
+def load_json(path: Path, default: Any = None) -> Any:
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return default
+
+
+def iso_date_or_none(value: Any) -> str | None:
+    if not value:
+        return None
+    text = str(value)[:10]
+    try:
+        datetime.strptime(text, "%Y-%m-%d")
+    except ValueError:
+        return None
+    return text
+
+
+def run(cmd: list[str]) -> int:
+    print(f"[cloud_scan_worker] run: {' '.join(cmd)}", flush=True)
+    proc = subprocess.run(cmd, cwd=ROOT, env={**os.environ, "SWING_TERMINAL_ROOT": str(ROOT)})
+    print(f"[cloud_scan_worker] exit={proc.returncode}: {' '.join(cmd)}", flush=True)
+    return int(proc.returncode)
+
+
+def restore_state(config: supabase_io.SupabaseConfig) -> list[str]:
+    restored: list[str] = []
+    for artifact_key, path in RESTORED_ARTIFACTS.items():
+        try:
+            if supabase_io.restore_json_artifact(config, artifact_key, path):
+                restored.append(artifact_key)
+        except supabase_io.SupabaseError as exc:
+            print(f"[cloud_scan_worker] restore failed for {artifact_key}: {exc}", file=sys.stderr, flush=True)
+    return restored
+
+
+def event_rows_from_journal(source: str, journal: dict) -> list[dict]:
+    rows = []
+    for item in journal.get("signals", []) if isinstance(journal, dict) else []:
+        signal_key = str(item.get("key") or "")
+        if not signal_key:
+            continue
+        status = str(item.get("status") or "UNKNOWN")
+        rows.append({
+            "event_key": f"{source}|{signal_key}",
+            "source": source,
+            "signal_key": signal_key,
+            "scan_date": iso_date_or_none(item.get("date")),
+            "ticker": item.get("ticker"),
+            "name": item.get("name"),
+            "signal_type": item.get("type") or item.get("signal") or item.get("signal_key"),
+            "status": status,
+            "active": bool(item.get("active")),
+            "first_seen_at": item.get("first_seen_at"),
+            "last_seen_at": item.get("last_seen_at"),
+            "last_checked_at": item.get("last_checked_at"),
+            "payload": item,
+            "updated_at": supabase_io.utc_now(),
+        })
+    return rows
+
+
+def live_trade_rows(payload: dict) -> list[dict]:
+    return [
+        {
+            "id": str(trade["id"]),
+            "status": trade.get("status"),
+            "signal_key": trade.get("signal_key"),
+            "execution_ticker": trade.get("execution_ticker"),
+            "payload": trade,
+            "updated_at": supabase_io.utc_now(),
+        }
+        for trade in payload.get("trades", [])
+        if isinstance(trade, dict) and trade.get("id")
+    ] if isinstance(payload, dict) else []
+
+
+def execution_map_rows(payload: dict) -> list[dict]:
+    mappings = payload.get("mappings", {}) if isinstance(payload, dict) else {}
+    return [
+        {
+            "signal_ticker": str(signal_ticker),
+            "execution_ticker": mapping.get("execution_ticker"),
+            "payload": mapping,
+            "updated_at": supabase_io.utc_now(),
+        }
+        for signal_ticker, mapping in mappings.items()
+        if isinstance(mapping, dict)
+    ]
+
+
+def journal_scan_date(journal: Any) -> str | None:
+    if not isinstance(journal, dict):
+        return None
+    return iso_date_or_none(journal.get("scan_date") or journal.get("date"))
+
+
+def latest_scan_date(latest: Any) -> str | None:
+    if not isinstance(latest, dict):
+        return None
+    return iso_date_or_none(latest.get("date") or latest.get("scan_date"))
+
+
+def infer_run_scan_date(mode: str, latest: dict, stock_journal: dict) -> str | None:
+    latest_date = latest_scan_date(latest)
+    stock_date = journal_scan_date(stock_journal)
+    if mode == "stocks":
+        return stock_date or latest_date
+    if mode == "etf":
+        return latest_date or stock_date
+    return latest_date or stock_date
+
+
+def artifact_scan_date(artifact_key: str, path: Path, fallback: str | None) -> str | None:
+    payload = load_json(path, None)
+    if artifact_key == "latest-signals":
+        return latest_scan_date(payload) or fallback
+    if artifact_key in {"signal-journal", "stock-signal-journal"}:
+        return journal_scan_date(payload) or fallback
+    if artifact_key == "stock-current-coverage" and isinstance(payload, dict):
+        return iso_date_or_none(payload.get("generated_at")) or fallback
+    return fallback
+
+
+def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
+    latest = load_json(DATA_DIR / "latest-signals.json", {})
+    stock_journal = load_json(DATA_DIR / "stock-signal-journal.json", {})
+    stock_coverage = load_json(DATA_DIR / "stock_framework_current_scan_coverage.json", {})
+    stock_signals = stock_journal.get("signals", []) if isinstance(stock_journal, dict) else []
+    return {
+        "run_id": run_id,
+        "created_at": supabase_io.utc_now(),
+        "scan_date": infer_run_scan_date(mode, latest, stock_journal),
+        "runner": os.environ.get("RENDER_SERVICE_NAME") or os.environ.get("GITHUB_WORKFLOW") or "local",
+        "mode": mode,
+        "status": status,
+        "exit_code": exit_code,
+        "etf_signals": int(latest.get("cap_count", 0) or 0) + int(latest.get("pb_count", 0) or 0) + int(latest.get("pb126_count", 0) or 0),
+        "stock_live_review": sum(1 for item in stock_signals if item.get("action") == "LIVE_REVIEW" and item.get("active")),
+        "total_scanned": stock_coverage.get("stocks") if mode == "stocks" and isinstance(stock_coverage, dict) else latest.get("total_scanned"),
+        "error_count": stock_coverage.get("fail") if mode == "stocks" and isinstance(stock_coverage, dict) else latest.get("err_count"),
+        "skip_count": latest.get("skip_count"),
+        "payload": {
+            "latest": latest,
+            "stock_signal_memory": {
+                "scan_date": stock_journal.get("scan_date") if isinstance(stock_journal, dict) else None,
+                "active": sum(1 for item in stock_signals if item.get("active")),
+                "total": len(stock_signals),
+            },
+            "stock_current_coverage": {
+                "generated_at": stock_coverage.get("generated_at") if isinstance(stock_coverage, dict) else None,
+                "ok": stock_coverage.get("ok") if isinstance(stock_coverage, dict) else None,
+                "fail": stock_coverage.get("fail") if isinstance(stock_coverage, dict) else None,
+                "current": stock_coverage.get("current") if isinstance(stock_coverage, dict) else None,
+            },
+        },
+    }
+
+
+def publish_state(config: supabase_io.SupabaseConfig, run_summary: dict) -> None:
+    scan_date = run_summary.get("scan_date")
+    for artifact_key, (kind, path) in PUBLISHED_JSON_ARTIFACTS.items():
+        if path.exists():
+            supabase_io.upload_json_file(
+                config,
+                artifact_key=artifact_key,
+                kind=kind,
+                path=path,
+                scan_date=artifact_scan_date(artifact_key, path, scan_date),
+            )
+    for artifact_key, (kind, path) in PUBLISHED_TEXT_ARTIFACTS.items():
+        if path.exists():
+            supabase_io.upload_text_file(
+                config,
+                artifact_key=artifact_key,
+                kind=kind,
+                path=path,
+                scan_date=scan_date,
+            )
+
+    etf_journal = load_json(DATA_DIR / "signal-journal.json", {})
+    stock_journal = load_json(DATA_DIR / "stock-signal-journal.json", {})
+    supabase_io.upsert_rows(
+        config,
+        "signal_events",
+        event_rows_from_journal("etf", etf_journal) + event_rows_from_journal("stock", stock_journal),
+        on_conflict="event_key",
+    )
+
+    live_trades = load_json(DATA_DIR / "live-trades.json", {})
+    supabase_io.upsert_rows(config, "live_trades", live_trade_rows(live_trades), on_conflict="id")
+
+    execution_map = load_json(DATA_DIR / "execution_map.json", {})
+    supabase_io.upsert_rows(config, "execution_map", execution_map_rows(execution_map), on_conflict="signal_ticker")
+
+    supabase_io.upsert_rows(config, "scan_runs", [run_summary], on_conflict="run_id")
+
+
+def notify_latest() -> None:
+    try:
+        import run_scan_notify  # noqa: WPS433
+
+        run_scan_notify.notify_from_latest()
+    except Exception as exc:
+        print(f"[cloud_scan_worker] notify failed: {exc}", file=sys.stderr, flush=True)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Cloud runner for the swing terminal scanner")
+    parser.add_argument("--mode", choices=["all", "etf", "stocks"], default="all")
+    parser.add_argument("--portfolio", type=float, default=60_000)
+    parser.add_argument("--date", default=None, help="Optional YYYY-MM-DD override for daily_scan.py")
+    parser.add_argument("--daily-dry-run", action="store_true", help="Pass --dry-run to daily_scan.py")
+    parser.add_argument("--no-upload", action="store_true", help="Do not publish to Supabase")
+    parser.add_argument("--no-notify", action="store_true", help="Do not send Telegram/macOS notifications")
+    parser.add_argument("--no-restore", action="store_true", help="Do not restore state from Supabase before scan")
+    parser.add_argument("--force", action="store_true", help="Ignore weekday/hour guard")
+    parser.add_argument("--respect-market-hours", action="store_true", default=True)
+    return parser.parse_args()
+
+
+def main() -> int:
+    load_default_env()
+    args = parse_args()
+    os.chdir(ROOT)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    local_now = now_stockholm()
+    run_id = f"{local_now.strftime('%Y%m%dT%H%M%S')}-{os.environ.get('RENDER_INSTANCE_ID', 'local')}"
+    if args.respect_market_hours and not args.force and not in_stockholm_scan_window(local_now):
+        print(f"[cloud_scan_worker] outside scan window Europe/Stockholm: {local_now.isoformat(timespec='seconds')}")
+        return 0
+
+    config = None if args.no_upload else supabase_io.config_from_env(required=True)
+    if config and not args.no_restore:
+        restored = restore_state(config)
+        print(f"[cloud_scan_worker] restored: {', '.join(restored) if restored else 'none'}", flush=True)
+
+    exit_code = 0
+    if args.mode in {"all", "etf"}:
+        cmd = [sys.executable, str(ROOT / "scripts" / "daily_scan.py"), "--portfolio", str(args.portfolio)]
+        if args.date:
+            cmd += ["--date", args.date]
+        if args.daily_dry_run:
+            cmd.append("--dry-run")
+        exit_code = max(exit_code, run(cmd))
+
+    if args.mode in {"all", "stocks"} and not args.daily_dry_run:
+        exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "stock_current_scan.py")]))
+        stock_inputs = [
+            DATA_DIR / "stock_framework_robustness_summary.json",
+            DATA_DIR / "stock_framework_walkforward_summary.json",
+            DATA_DIR / "stock_framework_deep_current_signals.json",
+        ]
+        if all(path.exists() for path in stock_inputs):
+            exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "export_stock_terminal_data.py")]))
+        else:
+            print("[cloud_scan_worker] stock export skipped: missing stock framework JSON inputs", flush=True)
+
+    if not args.no_notify and exit_code == 0:
+        notify_latest()
+
+    status = "OK" if exit_code == 0 else "FAIL"
+    run_summary = summarize_run(run_id=run_id, mode=args.mode, status=status, exit_code=exit_code)
+    if config:
+        try:
+            publish_state(config, run_summary)
+            print("[cloud_scan_worker] published state to Supabase", flush=True)
+        except supabase_io.SupabaseError as exc:
+            print(f"[cloud_scan_worker] publish failed: {exc}", file=sys.stderr, flush=True)
+            return max(exit_code, 3)
+
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

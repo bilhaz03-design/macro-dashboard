@@ -1,0 +1,60 @@
+services:
+  - type: cron
+    name: swing-terminal-etf-scanner-15m
+    runtime: python
+    plan: starter
+    schedule: "*/15 6-21 * * 1-5"
+    buildCommand: "pip install -r requirements-cloud.txt"
+    startCommand: "python scripts/cloud_scan_worker.py --mode etf"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: SWING_TERMINAL_CLOUD_RUN
+        value: "1"
+      - key: FORCE_QUIET_NOTIFY
+        value: "1"
+      - key: SWING_TERMINAL_DASHBOARD_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_INGEST_TOKEN
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+
+  - type: cron
+    name: swing-terminal-stock-scanner-hourly
+    runtime: python
+    plan: starter
+    schedule: "5 7-22 * * 1-5"
+    buildCommand: "pip install -r requirements-cloud.txt"
+    startCommand: "python scripts/cloud_scan_worker.py --mode stocks"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: SWING_TERMINAL_CLOUD_RUN
+        value: "1"
+      - key: FORCE_QUIET_NOTIFY
+        value: "1"
+      - key: SWING_TERMINAL_STOCK_CACHE_MAX_AGE_HOURS
+        value: "6"
+      - key: SWING_TERMINAL_DASHBOARD_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_INGEST_TOKEN
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false

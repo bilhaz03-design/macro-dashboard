@@ -1,0 +1,8 @@
+# Minimal dependency set for the cloud scanner runner.
+# Keep this smaller than requirements.txt so Render/GitHub cron does not need
+# dashboard, plotting, spreadsheet, or TA-Lib packages.
+numpy
+pandas
+scipy
+yfinance
+requests
