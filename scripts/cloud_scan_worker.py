@@ -298,7 +298,8 @@ def main() -> int:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     local_now = now_stockholm()
-    run_id = f"{local_now.strftime('%Y%m%dT%H%M%S')}-{os.environ.get('RENDER_INSTANCE_ID', 'local')}"
+    runner_instance = os.environ.get("RENDER_INSTANCE_ID") or os.environ.get("GITHUB_RUN_ID") or "local"
+    run_id = f"{local_now.strftime('%Y%m%dT%H%M%S')}-{runner_instance}"
     if args.respect_market_hours and not args.force and not in_stockholm_scan_window(local_now):
         print(f"[cloud_scan_worker] outside scan window Europe/Stockholm: {local_now.isoformat(timespec='seconds')}")
         return 0

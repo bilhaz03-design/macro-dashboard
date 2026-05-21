@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "13,43 7-21 * * 1-5"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Ignore watch window for a manual smoke test"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: swing-terminal-watchdog-${{ github.ref }}
@@ -25,6 +31,7 @@ jobs:
       SWING_TERMINAL_DASHBOARD_URL: ${{ secrets.SWING_TERMINAL_DASHBOARD_URL }}
       SWING_TERMINAL_CLOUD_RUN: "1"
       SWING_TERMINAL_ROOT: ${{ github.workspace }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -35,4 +42,10 @@ jobs:
           python-version: "3.11"
 
       - name: Check scanner heartbeat
-        run: python scripts/cloud_watchdog.py --max-age-minutes 50
+        shell: bash
+        run: |
+          args=(--max-age-minutes 50)
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            args+=(--force)
+          fi
+          python scripts/cloud_watchdog.py "${args[@]}"

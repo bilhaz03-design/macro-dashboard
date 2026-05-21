@@ -15,6 +15,11 @@ on:
           - etf
           - stocks
           - all
+      force:
+        description: "Ignore market-hours guard for a manual smoke test"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: swing-terminal-cloud-${{ github.ref }}
@@ -36,6 +41,7 @@ jobs:
       SWING_TERMINAL_DASHBOARD_URL: ${{ secrets.SWING_TERMINAL_DASHBOARD_URL }}
       SWING_TERMINAL_CLOUD_RUN: "1"
       SWING_TERMINAL_ROOT: ${{ github.workspace }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -65,4 +71,10 @@ jobs:
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
 
       - name: Run cloud scanner
-        run: python scripts/cloud_scan_worker.py --mode "${{ steps.scan-mode.outputs.mode }}"
+        shell: bash
+        run: |
+          args=(--mode "${{ steps.scan-mode.outputs.mode }}")
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            args+=(--force)
+          fi
+          python scripts/cloud_scan_worker.py "${args[@]}"
