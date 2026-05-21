@@ -22,6 +22,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   watchdog:
@@ -37,6 +38,7 @@ jobs:
       SWING_TERMINAL_CLOUD_RUN: "1"
       SWING_TERMINAL_ROOT: ${{ github.workspace }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -49,7 +51,13 @@ jobs:
       - name: Check scanner heartbeat
         shell: bash
         run: |
-          args=(--max-age-minutes 50)
+          args=(
+            --max-age-minutes 50
+            --expect-mode etf:50
+            --expect-mode stocks:130
+            --dispatch-on-stale
+            --heal-cooldown-minutes 45
+          )
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             args+=(--force)
           fi

@@ -15,6 +15,15 @@ The upgraded chain is:
 5. GitHub Actions runs the Python scanner and writes state back to Supabase.
 6. Telegram remains the notification layer for real scanner events.
 
+The GitHub watchdog now has a second self-healing layer too:
+
+- It checks ETF and stock heartbeats separately.
+- ETF is stale after 50 minutes.
+- Stocks are stale after 130 minutes.
+- If a heartbeat is stale, the watchdog dispatches the scanner workflow itself.
+- It uses per-mode cooldown so a broken dependency cannot create an infinite
+  workflow storm.
+
 ## Why Cloudflare Workers
 
 Cloudflare Workers Free currently gives 100,000 requests per day, 5 Cron
