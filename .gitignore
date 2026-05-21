@@ -8,6 +8,7 @@ output/
 *.log
 /tmp/
 test-results/
+supabase/.temp/
 data/stock_cache/
 data/daily-scan-*.txt
 data/watchlist-*.md

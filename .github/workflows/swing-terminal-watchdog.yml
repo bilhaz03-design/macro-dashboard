@@ -2,11 +2,16 @@ name: Swing Terminal Cloud Watchdog
 
 on:
   schedule:
-    - cron: "13,43 7-21 * * 1-5"
+    - cron: "28,58 7-21 * * 1-5"
   workflow_dispatch:
     inputs:
       force:
         description: "Ignore watch window for a manual smoke test"
+        required: false
+        default: false
+        type: boolean
+      no_notify:
+        description: "Run without sending Telegram notifications"
         required: false
         default: false
         type: boolean
@@ -47,5 +52,8 @@ jobs:
           args=(--max-age-minutes 50)
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             args+=(--force)
+          fi
+          if [ "${{ github.event.inputs.no_notify }}" = "true" ]; then
+            args+=(--no-notify)
           fi
           python scripts/cloud_watchdog.py "${args[@]}"

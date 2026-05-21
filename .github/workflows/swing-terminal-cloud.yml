@@ -2,8 +2,8 @@ name: Swing Terminal Cloud Scanner
 
 on:
   schedule:
-    - cron: "7,22,37,52 7-21 * * 1-5"
-    - cron: "11 7-21 * * 1-5"
+    - cron: "3 7-21 * * 1-5"
+    - cron: "33 7-21 * * 1-5"
   workflow_dispatch:
     inputs:
       mode:
@@ -17,6 +17,11 @@ on:
           - all
       force:
         description: "Ignore market-hours guard for a manual smoke test"
+        required: false
+        default: false
+        type: boolean
+      no_notify:
+        description: "Run without sending Telegram/macOS notifications"
         required: false
         default: false
         type: boolean
@@ -62,7 +67,7 @@ jobs:
         run: |
           mode="${{ github.event.inputs.mode }}"
           if [ -z "$mode" ]; then
-            if [ "${{ github.event.schedule }}" = "11 7-21 * * 1-5" ]; then
+            if [ "${{ github.event.schedule }}" = "33 7-21 * * 1-5" ]; then
               mode="stocks"
             else
               mode="etf"
@@ -76,5 +81,8 @@ jobs:
           args=(--mode "${{ steps.scan-mode.outputs.mode }}")
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             args+=(--force)
+          fi
+          if [ "${{ github.event.inputs.no_notify }}" = "true" ]; then
+            args+=(--no-notify)
           fi
           python scripts/cloud_scan_worker.py "${args[@]}"
