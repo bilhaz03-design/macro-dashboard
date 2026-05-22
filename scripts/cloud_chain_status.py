@@ -26,6 +26,8 @@ DEFAULT_EXPECTATIONS = [("etf", 50), ("stocks", 130)]
 WORKFLOWS = (
     "Swing Terminal Cloud Scanner",
     "Swing Terminal Cloud Watchdog",
+    "Swing Terminal CI",
+    "Swing Terminal Safety",
     "Deploy Cloudflare Backup Clock",
 )
 
