@@ -292,6 +292,33 @@ def test_summarize_run_records_quality_failure_reason(monkeypatch):
     assert failure["etf_coverage_error"] == "err_count=20 above max_errors=4 (10% of 44)"
 
 
+def test_summarize_run_counts_all_mode_etfs_and_stocks(monkeypatch):
+    def fake_load_json(path, default=None):
+        if path == cloud_scan_worker.ETF_SIGNALS_PATH:
+            return {
+                "date": "2026-05-22",
+                "total_scanned": 44,
+                "err_count": 1,
+                "skip_count": 0,
+            }
+        if path == cloud_scan_worker.STOCK_COVERAGE_PATH:
+            return {"stocks": 108, "ok": 106, "fail": 2, "current": 90}
+        return {"scan_date": "2026-05-22", "signals": []}
+
+    monkeypatch.setattr(cloud_scan_worker, "load_json", fake_load_json)
+
+    summary = cloud_scan_worker.summarize_run(
+        run_id="all-run",
+        mode="all",
+        status="OK",
+        exit_code=0,
+    )
+
+    assert summary["total_scanned"] == 152
+    assert summary["error_count"] == 3
+    assert summary["payload"]["stock_current_coverage"]["stocks"] == 108
+
+
 def test_publish_run_summary_writes_only_scan_runs(monkeypatch):
     config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
     calls = []

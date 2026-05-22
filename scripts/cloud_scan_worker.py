@@ -407,6 +407,40 @@ def artifact_scan_date(artifact_key: str, path: Path, fallback: str | None) -> s
     return fallback
 
 
+def int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def summed_counts(*values: Any) -> int | None:
+    parsed = [value for value in (int_or_none(item) for item in values) if value is not None]
+    return sum(parsed) if parsed else None
+
+
+def run_total_scanned(mode: str, latest: Any, stock_coverage: Any) -> int | None:
+    latest_total = latest.get("total_scanned") if isinstance(latest, dict) else None
+    stock_total = stock_coverage.get("stocks") if isinstance(stock_coverage, dict) else None
+    if mode == "stocks":
+        return int_or_none(stock_total)
+    if mode == "all":
+        return summed_counts(latest_total, stock_total)
+    return int_or_none(latest_total)
+
+
+def run_error_count(mode: str, latest: Any, stock_coverage: Any) -> int | None:
+    latest_errors = latest.get("err_count") if isinstance(latest, dict) else None
+    stock_errors = stock_coverage.get("fail") if isinstance(stock_coverage, dict) else None
+    if mode == "stocks":
+        return int_or_none(stock_errors)
+    if mode == "all":
+        return summed_counts(latest_errors, stock_errors)
+    return int_or_none(latest_errors)
+
+
 def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
     latest = load_json(ETF_SIGNALS_PATH, {})
     stock_journal = load_json(DATA_DIR / "stock-signal-journal.json", {})
@@ -421,6 +455,7 @@ def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
         },
         "stock_current_coverage": {
             "generated_at": stock_coverage.get("generated_at") if isinstance(stock_coverage, dict) else None,
+            "stocks": stock_coverage.get("stocks") if isinstance(stock_coverage, dict) else None,
             "ok": stock_coverage.get("ok") if isinstance(stock_coverage, dict) else None,
             "fail": stock_coverage.get("fail") if isinstance(stock_coverage, dict) else None,
             "current": stock_coverage.get("current") if isinstance(stock_coverage, dict) else None,
@@ -439,8 +474,8 @@ def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
         "exit_code": exit_code,
         "etf_signals": int(latest.get("cap_count", 0) or 0) + int(latest.get("pb_count", 0) or 0) + int(latest.get("pb126_count", 0) or 0),
         "stock_live_review": sum(1 for item in stock_signals if item.get("action") == "LIVE_REVIEW" and item.get("active")),
-        "total_scanned": stock_coverage.get("stocks") if mode == "stocks" and isinstance(stock_coverage, dict) else latest.get("total_scanned"),
-        "error_count": stock_coverage.get("fail") if mode == "stocks" and isinstance(stock_coverage, dict) else latest.get("err_count"),
+        "total_scanned": run_total_scanned(mode, latest, stock_coverage),
+        "error_count": run_error_count(mode, latest, stock_coverage),
         "skip_count": latest.get("skip_count"),
         "payload": payload,
     }
