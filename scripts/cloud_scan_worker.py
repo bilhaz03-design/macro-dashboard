@@ -64,6 +64,8 @@ FRESH_SCAN_DEDUPE_WINDOWS = {
 
 STOCK_COVERAGE_PATH = DATA_DIR / "stock_framework_current_scan_coverage.json"
 STOCK_COVERAGE_FAIL_EXIT_CODE = 4
+ETF_SIGNALS_PATH = DATA_DIR / "latest-signals.json"
+ETF_COVERAGE_FAIL_EXIT_CODE = 5
 
 
 def now_stockholm() -> datetime:
@@ -227,6 +229,48 @@ def validate_stock_coverage(path: Path = STOCK_COVERAGE_PATH) -> int:
     return 0
 
 
+def etf_coverage_quality_error(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return "latest-signals payload missing or malformed"
+    try:
+        total = int(payload.get("total_scanned") or 0)
+        errors = int(payload.get("err_count") or 0)
+        skips = int(payload.get("skip_count") or 0)
+    except (TypeError, ValueError):
+        return "ETF coverage counts are not numeric"
+    min_total = parse_positive_int_env("SWING_TERMINAL_ETF_MIN_SCANNED", 40)
+    if total < min_total:
+        return f"total_scanned={total} below min_total={min_total}"
+    if total <= 0:
+        return "ETF coverage has no scanned instruments"
+
+    max_error_ratio = parse_ratio_env("SWING_TERMINAL_ETF_MAX_ERROR_RATIO", 0.10)
+    max_skip_ratio = parse_ratio_env("SWING_TERMINAL_ETF_MAX_SKIP_RATIO", 0.20)
+    max_errors = math.floor(total * max_error_ratio)
+    max_skips = math.floor(total * max_skip_ratio)
+    if errors > max_errors:
+        return f"err_count={errors} above max_errors={max_errors} ({max_error_ratio:.0%} of {total})"
+    if skips > max_skips:
+        return f"skip_count={skips} above max_skips={max_skips} ({max_skip_ratio:.0%} of {total})"
+    return None
+
+
+def validate_etf_coverage(path: Path = ETF_SIGNALS_PATH) -> int:
+    payload = load_json(path, None)
+    error = etf_coverage_quality_error(payload)
+    if error:
+        print(f"[cloud_scan_worker] ETF coverage FAIL: {error}", file=sys.stderr, flush=True)
+        return ETF_COVERAGE_FAIL_EXIT_CODE
+    assert isinstance(payload, dict)
+    print(
+        "[cloud_scan_worker] ETF coverage OK: "
+        f"total={payload.get('total_scanned')} errors={payload.get('err_count')} skips={payload.get('skip_count')} "
+        f"signals={int(payload.get('cap_count', 0) or 0) + int(payload.get('pb_count', 0) or 0) + int(payload.get('pb126_count', 0) or 0)}",
+        flush=True,
+    )
+    return 0
+
+
 def run(cmd: list[str]) -> int:
     print(f"[cloud_scan_worker] run: {' '.join(cmd)}", flush=True)
     proc = subprocess.run(cmd, cwd=ROOT, env={**os.environ, "SWING_TERMINAL_ROOT": str(ROOT)})
@@ -334,7 +378,7 @@ def artifact_scan_date(artifact_key: str, path: Path, fallback: str | None) -> s
 
 
 def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
-    latest = load_json(DATA_DIR / "latest-signals.json", {})
+    latest = load_json(ETF_SIGNALS_PATH, {})
     stock_journal = load_json(DATA_DIR / "stock-signal-journal.json", {})
     stock_coverage = load_json(STOCK_COVERAGE_PATH, {})
     stock_signals = stock_journal.get("signals", []) if isinstance(stock_journal, dict) else []
@@ -465,6 +509,7 @@ def main() -> int:
         if args.daily_dry_run:
             cmd.append("--dry-run")
         exit_code = max(exit_code, run(cmd))
+        exit_code = max(exit_code, validate_etf_coverage())
 
     if args.mode in {"all", "stocks"} and not args.daily_dry_run:
         exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "stock_current_scan.py")]))

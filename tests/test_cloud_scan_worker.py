@@ -209,3 +209,54 @@ def test_validate_stock_coverage_returns_failure_for_bad_payload(tmp_path):
     path.write_text('{"stocks": 108, "ok": 80, "fail": 28}', encoding="utf-8")
 
     assert cloud_scan_worker.validate_stock_coverage(path) == cloud_scan_worker.STOCK_COVERAGE_FAIL_EXIT_CODE
+
+
+def test_etf_coverage_quality_accepts_normal_scan(monkeypatch):
+    monkeypatch.delenv("SWING_TERMINAL_ETF_MIN_SCANNED", raising=False)
+    monkeypatch.delenv("SWING_TERMINAL_ETF_MAX_ERROR_RATIO", raising=False)
+    monkeypatch.delenv("SWING_TERMINAL_ETF_MAX_SKIP_RATIO", raising=False)
+
+    assert cloud_scan_worker.etf_coverage_quality_error({
+        "total_scanned": 44,
+        "err_count": 4,
+        "skip_count": 8,
+        "cap_count": 0,
+        "pb_count": 1,
+        "pb126_count": 0,
+    }) is None
+
+
+def test_etf_coverage_quality_rejects_too_few_scanned(monkeypatch):
+    monkeypatch.delenv("SWING_TERMINAL_ETF_MIN_SCANNED", raising=False)
+
+    error = cloud_scan_worker.etf_coverage_quality_error({
+        "total_scanned": 39,
+        "err_count": 0,
+        "skip_count": 0,
+    })
+
+    assert "below min_total=40" in error
+
+
+def test_etf_coverage_quality_rejects_error_and_skip_spikes(monkeypatch):
+    monkeypatch.setenv("SWING_TERMINAL_ETF_MIN_SCANNED", "20")
+    monkeypatch.setenv("SWING_TERMINAL_ETF_MAX_ERROR_RATIO", "0.10")
+    monkeypatch.setenv("SWING_TERMINAL_ETF_MAX_SKIP_RATIO", "0.20")
+
+    assert "above max_errors=4" in cloud_scan_worker.etf_coverage_quality_error({
+        "total_scanned": 44,
+        "err_count": 5,
+        "skip_count": 0,
+    })
+    assert "above max_skips=8" in cloud_scan_worker.etf_coverage_quality_error({
+        "total_scanned": 44,
+        "err_count": 0,
+        "skip_count": 9,
+    })
+
+
+def test_validate_etf_coverage_returns_failure_for_bad_payload(tmp_path):
+    path = tmp_path / "latest-signals.json"
+    path.write_text('{"total_scanned": 44, "err_count": 20, "skip_count": 0}', encoding="utf-8")
+
+    assert cloud_scan_worker.validate_etf_coverage(path) == cloud_scan_worker.ETF_COVERAGE_FAIL_EXIT_CODE
