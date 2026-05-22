@@ -1,0 +1,67 @@
+name: Swing Terminal CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scanner-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements-cloud.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-cloud.txt pytest pyyaml
+
+      - name: Validate workflow YAML
+        run: |
+          python - <<'PY'
+          import pathlib, yaml
+          for path in pathlib.Path('.github/workflows').glob('*.yml'):
+              with path.open() as handle:
+                  yaml.safe_load(handle)
+              print(f'ok {path}')
+          PY
+
+      - name: Compile cloud scripts
+        run: |
+          python -m py_compile \
+            scripts/cloud_chain_status.py \
+            scripts/cloud_scan_worker.py \
+            scripts/cloud_watchdog.py \
+            scripts/run_scan_notify.py \
+            scripts/secret_scan.py \
+            scripts/stock_current_scan.py \
+            scripts/stock_framework_deep_research.py \
+            scripts/supabase_io.py
+
+      - name: Run scanner tests
+        run: |
+          pytest \
+            tests/test_secret_scan.py \
+            tests/test_cloud_watchdog.py \
+            tests/test_cloud_chain_status.py \
+            tests/test_stock_data_fetch.py \
+            tests/test_cloud_scan_worker.py \
+            tests/test_supabase_io.py \
+            tests/test_run_scan_notify.py \
+            tests/test_env_loader.py
