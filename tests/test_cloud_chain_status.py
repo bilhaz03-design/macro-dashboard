@@ -32,6 +32,20 @@ def test_action_required_flags_stale_heartbeat_inside_watch_window():
     assert cloud_chain_status.has_action_required(status) is True
 
 
+def test_action_required_uses_watchdog_window_not_scanner_window():
+    status = {
+        "scan_window_open": True,
+        "watchdog_window_open": False,
+        "supabase": {
+            "ok": True,
+            "checks": [{"mode": "stocks", "healthy": False}],
+        },
+        "github": {},
+    }
+
+    assert cloud_chain_status.has_action_required(status) is False
+
+
 def test_action_required_flags_failed_core_workflow():
     status = {
         "watch_window_open": False,

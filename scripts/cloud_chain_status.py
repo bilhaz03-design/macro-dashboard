@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(os.environ.get("SWING_TERMINAL_ROOT", Path(__file__).resolve().parents[1])).resolve()
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import cloud_scan_worker  # noqa: E402
 import cloud_watchdog  # noqa: E402
 import supabase_io  # noqa: E402
 from env_loader import load_default_env  # noqa: E402
@@ -136,6 +137,8 @@ def build_status(repo: str, github_limit: int) -> dict:
     status: dict[str, Any] = {
         "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "local_time": local_now.isoformat(timespec="seconds"),
+        "scan_window_open": cloud_scan_worker.in_stockholm_scan_window(local_now),
+        "watchdog_window_open": cloud_watchdog.in_watch_window(local_now),
         "watch_window_open": cloud_watchdog.in_watch_window(local_now),
         "env": env_status(),
     }
@@ -150,7 +153,8 @@ def build_status(repo: str, github_limit: int) -> dict:
 def has_action_required(status: dict) -> bool:
     if not status.get("supabase", {}).get("ok"):
         return True
-    if status.get("watch_window_open"):
+    watchdog_window_open = status.get("watchdog_window_open", status.get("watch_window_open"))
+    if watchdog_window_open:
         checks = status.get("supabase", {}).get("checks", [])
         if any(not check.get("healthy") for check in checks):
             return True
@@ -178,7 +182,8 @@ def format_minutes(value: int | None) -> str:
 def print_text(status: dict) -> None:
     print("Swing-terminal cloud chain")
     print(f"Checked: {status['local_time']} Europe/Stockholm")
-    print(f"Watch window: {'open' if status['watch_window_open'] else 'closed'}")
+    print(f"Scanner window: {'open' if status.get('scan_window_open') else 'closed'}")
+    print(f"Watchdog window: {'open' if status.get('watchdog_window_open', status.get('watch_window_open')) else 'closed'}")
     print()
 
     print("Secrets/config")
