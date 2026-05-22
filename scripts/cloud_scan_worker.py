@@ -473,7 +473,7 @@ def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
         "status": status,
         "exit_code": exit_code,
         "etf_signals": int(latest.get("cap_count", 0) or 0) + int(latest.get("pb_count", 0) or 0) + int(latest.get("pb126_count", 0) or 0),
-        "stock_live_review": sum(1 for item in stock_signals if item.get("action") == "LIVE_REVIEW" and item.get("active")),
+        "stock_live_review": sum(1 for item in stock_signals if item.get("action") in {"TRADE", "LIVE_REVIEW"} and item.get("active")),
         "total_scanned": run_total_scanned(mode, latest, stock_coverage),
         "error_count": run_error_count(mode, latest, stock_coverage),
         "skip_count": latest.get("skip_count"),

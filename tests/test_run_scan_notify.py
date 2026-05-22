@@ -36,7 +36,7 @@ def test_stock_notification_state_is_saved_when_etf_events_are_already_deduped(m
             "entry": 88.5,
             "quality_score": 96,
             "tier": "TIER1",
-            "action": "LIVE_REVIEW",
+            "action": "TRADE",
             "active": True,
             "first_seen_at": "2026-05-21T15:00:00",
         }],

@@ -49,18 +49,19 @@ def combo_tier(label):
     if label == "ROBUST_BUT_RECENT_SPARSE":
         return "TIER1_WARNING"
     if label == "WATCHLIST_PLUS":
-        return "WATCHLIST_PLUS"
+        return "NO_TRADE"
     if label == "BLOCK_PATH":
         return "BLOCKED"
-    return "RESEARCH_ONLY"
+    return "NO_TRADE"
 
 
 def tier_rank(tier):
     return {
         "TIER1": 0,
         "TIER1_WARNING": 1,
+        "NO_TRADE": 2,
         "WATCHLIST_PLUS": 2,
-        "RESEARCH_ONLY": 3,
+        "RESEARCH_ONLY": 2,
         "BLOCKED": 4,
         "UNTESTED": 5,
     }.get(tier, 9)
@@ -68,12 +69,14 @@ def tier_rank(tier):
 
 def action_rank(action):
     return {
+        "TRADE": 0,
         "LIVE_REVIEW": 0,
+        "NO_TRADE": 1,
         "WAIT_95_SIGNAL": 1,
-        "WAIT_SIGNAL": 2,
-        "PAPER_TRACK": 3,
-        "RESEARCH_ONLY": 4,
-        "BLOCKED": 5,
+        "WAIT_SIGNAL": 1,
+        "PAPER_TRACK": 1,
+        "RESEARCH_ONLY": 1,
+        "BLOCKED": 1,
     }.get(action, 9)
 
 
@@ -85,7 +88,8 @@ def combo_quality(row):
     score = {
         "TIER1": 42,
         "TIER1_WARNING": 36,
-        "WATCHLIST_PLUS": 29,
+        "NO_TRADE": 12,
+        "WATCHLIST_PLUS": 12,
         "RESEARCH_ONLY": 12,
         "UNTESTED": 0,
     }.get(tier, 0)
@@ -142,7 +146,7 @@ def combo_quality(row):
     elif score >= 70:
         label = "C"
     else:
-        label = "Research"
+        label = "No trade"
     return score, label, blockers[:5]
 
 
@@ -150,7 +154,12 @@ def simplify_combo(row):
     s = row.get("summary", {})
     recent = row.get("recent", {})
     recent2023 = row.get("recent2023", {})
-    label = row.get("label", "RESEARCH_ONLY")
+    raw_label = row.get("label", "NO_TRADE")
+    label = {
+        "RESEARCH_ONLY": "NO_TRADE",
+        "WATCHLIST_PLUS": "NO_TRADE",
+        "BLOCK_PATH": "BLOCKED",
+    }.get(raw_label, raw_label)
     out = {
         "ticker": row.get("ticker"),
         "name": row.get("name"),
@@ -158,7 +167,7 @@ def simplify_combo(row):
         "group": row.get("group"),
         "signal": row.get("signal"),
         "label": label,
-        "tier": combo_tier(label),
+        "tier": combo_tier(raw_label),
         "n": s.get("n", 0),
         "fwd21_mean": stat(s, "mean"),
         "fwd21_median": stat(s, "median"),
@@ -250,6 +259,12 @@ def update_stock_signal_journal(current_rows, path=STOCK_JOURNAL_PATH):
             if was_active:
                 faded_this_run.append(item)
 
+    for item in entries.values():
+        if item.get("action") not in {"TRADE", "NO_TRADE"}:
+            item["action"] = "NO_TRADE"
+        if item.get("tier") in {"RESEARCH_ONLY", "WATCHLIST_PLUS"}:
+            item["tier"] = "NO_TRADE"
+
     kept = sorted(entries.values(), key=lambda x: (str(x.get("date")), str(x.get("first_seen_at")), str(x.get("ticker"))))[-500:]
     today = [item for item in kept if item.get("date") == scan_date]
     payload = {
@@ -286,38 +301,36 @@ def stock_blockers(best, current_rows):
         if not has_strict:
             blockers.append("no strict live gate")
         current_best = sorted(current_rows, key=lambda row: action_rank(row["action"]))[0]
-        if current_best.get("action") != "LIVE_REVIEW":
-            blockers.append("not live-review")
+        if current_best.get("action") != "TRADE":
+            blockers.append("current signal blocked")
     if best.get("mae_p10") is not None and best["mae_p10"] < -0.18:
         blockers.append("path risk")
-    blockers.append("earnings/news/spread check")
     return blockers[:6]
 
 
 def stock_action(best, current_rows):
-    if not best:
-        return "RESEARCH_ONLY"
-    blockers = stock_blockers(best, current_rows)
-    if current_rows:
-        current_best = sorted(current_rows, key=lambda row: action_rank(row["action"]))[0]
-        if (
-            current_best["action"] == "LIVE_REVIEW"
-            and best["quality_score"] >= 95
-            and best["tier"] in {"TIER1", "TIER1_WARNING"}
-            and "no strict live gate" not in blockers
-        ):
-            return "LIVE_REVIEW"
-        if current_best["action"] == "PAPER_TRACK":
-            return "PAPER_TRACK"
-        if current_best["action"] == "BLOCKED":
-            return "BLOCKED"
-    if best["tier"] == "BLOCKED":
-        return "BLOCKED"
-    if best["quality_score"] >= 95:
-        return "WAIT_95_SIGNAL"
-    if best["quality_score"] >= 90:
-        return "WAIT_SIGNAL"
-    return "RESEARCH_ONLY"
+    return "TRADE" if not stock_blockers(best, current_rows) else "NO_TRADE"
+
+
+def current_signal_blockers(combo, gates):
+    blockers = []
+    if not combo:
+        return ["untested combo"]
+    if combo["tier"] == "BLOCKED":
+        return ["path-risk blocked"]
+    if combo["quality_score"] < 95:
+        blockers.append("quality<95")
+    if combo["tier"] not in {"TIER1", "TIER1_WARNING"}:
+        blockers.append("not robust tier")
+    if not any(g.get("gate") == "strict" for g in gates):
+        blockers.append("no strict live gate")
+    if combo.get("mae_p10") is not None and combo["mae_p10"] < -0.18:
+        blockers.append("path risk")
+    return blockers[:6]
+
+
+def current_signal_action(combo, gates):
+    return "TRADE" if not current_signal_blockers(combo, gates) else "NO_TRADE"
 
 
 def main() -> int:
@@ -355,17 +368,8 @@ def main() -> int:
         seen.add(key)
         combo = combo_by_key.get((raw.get("ticker"), raw.get("signal")))
         gates = gate_by_key.get(key, [])
-        has_strict = any(g["gate"] == "strict" for g in gates)
-        has_candidate = any(g["gate"] == "candidate" for g in gates)
-        robust = bool(combo and combo["tier"] in {"TIER1", "TIER1_WARNING"})
-        if robust and has_strict:
-            action = "LIVE_REVIEW"
-        elif has_candidate:
-            action = "PAPER_TRACK"
-        elif combo and combo["tier"] == "BLOCKED":
-            action = "BLOCKED"
-        else:
-            action = "RESEARCH_ONLY"
+        signal_blockers = current_signal_blockers(combo, gates)
+        action = current_signal_action(combo, gates)
         current.append({
             "date": raw.get("date"),
             "ticker": raw.get("ticker"),
@@ -383,6 +387,7 @@ def main() -> int:
             "quality_score": combo["quality_score"] if combo else 0,
             "quality": combo["quality"] if combo else "Untested",
             "quality_blockers": combo["quality_blockers"] if combo else ["untested combo"],
+            "blockers": signal_blockers,
             "combo": combo,
             "gates": gates,
             "action": action,
@@ -458,10 +463,12 @@ def main() -> int:
             "watchlist_plus": sum(1 for row in combos if row["tier"] == "WATCHLIST_PLUS"),
             "blocked": sum(1 for row in combos if row["tier"] == "BLOCKED"),
             "high_quality_stocks": sum(1 for row in stocks if row["quality_score"] >= 95),
-            "wait_95_signal": sum(1 for row in stocks if row["action"] == "WAIT_95_SIGNAL"),
-            "wait_signal": sum(1 for row in stocks if row["action"] == "WAIT_SIGNAL"),
-            "current_live_review": sum(1 for row in current if row["action"] == "LIVE_REVIEW"),
-            "current_paper_track": sum(1 for row in current if row["action"] == "PAPER_TRACK"),
+            "trade": sum(1 for row in stocks if row["action"] == "TRADE"),
+            "no_trade": sum(1 for row in stocks if row["action"] == "NO_TRADE"),
+            "current_trade": sum(1 for row in current if row["action"] == "TRADE"),
+            "current_no_trade": sum(1 for row in current if row["action"] == "NO_TRADE"),
+            "current_live_review": sum(1 for row in current if row["action"] == "TRADE"),
+            "current_paper_track": 0,
             "strict_oos_mean": stat(rolling.get("strict", {}), "mean"),
             "strict_oos_hit": stat(rolling.get("strict", {}), "hit"),
             "strict_oos_net_100bps": stat(rolling.get("strict", {}), "net_100bps"),

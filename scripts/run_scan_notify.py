@@ -129,7 +129,7 @@ def notify_stock_journal(sent_events: set[str]) -> bool:
     wrote_state = False
     signals = payload.get("signals", []) if isinstance(payload, dict) else []
     for item in signals:
-        if item.get("action") != "LIVE_REVIEW":
+        if item.get("action") not in {"TRADE", "LIVE_REVIEW"}:
             continue
         key = item.get("key")
         active_id = f"{key}|stock_active|{item.get('first_seen_at')}"
@@ -138,7 +138,7 @@ def notify_stock_journal(sent_events: set[str]) -> bool:
             if active_id in sent_events:
                 continue
             push(
-                "New stock scanner signal",
+                "New stock trade signal",
                 f"{item.get('ticker')} — {item.get('name')}",
                 f"{item.get('signal')} | Entry: {item.get('entry')} | Quality: {item.get('quality_score')} | Tier: {item.get('tier')}",
                 "Ping",

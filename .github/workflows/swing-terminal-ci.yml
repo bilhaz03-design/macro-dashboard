@@ -62,6 +62,7 @@ jobs:
             tests/test_cloud_watchdog.py \
             tests/test_cloud_chain_status.py \
             tests/test_stock_data_fetch.py \
+            tests/test_export_stock_terminal_data.py \
             tests/test_cloud_scan_worker.py \
             tests/test_github_failure_notify.py \
             tests/test_supabase_io.py \
