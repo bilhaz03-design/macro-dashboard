@@ -160,3 +160,52 @@ def test_fresh_scan_skip_reason_leaves_all_mode_unblocked(monkeypatch):
         "all",
         now_utc=datetime(2026, 5, 22, 9, 0, tzinfo=timezone.utc),
     ) is None
+
+
+def test_stock_coverage_quality_accepts_high_coverage(monkeypatch):
+    monkeypatch.delenv("SWING_TERMINAL_STOCK_MIN_OK_RATIO", raising=False)
+    monkeypatch.delenv("SWING_TERMINAL_STOCK_MAX_FAIL_RATIO", raising=False)
+
+    assert cloud_scan_worker.stock_coverage_quality_error({
+        "stocks": 108,
+        "ok": 103,
+        "fail": 5,
+        "current": 12,
+    }) is None
+
+
+def test_stock_coverage_quality_rejects_low_ok_count(monkeypatch):
+    monkeypatch.delenv("SWING_TERMINAL_STOCK_MIN_OK_RATIO", raising=False)
+    monkeypatch.delenv("SWING_TERMINAL_STOCK_MAX_FAIL_RATIO", raising=False)
+
+    error = cloud_scan_worker.stock_coverage_quality_error({
+        "stocks": 108,
+        "ok": 102,
+        "fail": 6,
+        "current": 12,
+    })
+
+    assert "below min_ok=103" in error
+
+
+def test_stock_coverage_quality_respects_env_thresholds(monkeypatch):
+    monkeypatch.setenv("SWING_TERMINAL_STOCK_MIN_OK_RATIO", "0.90")
+    monkeypatch.setenv("SWING_TERMINAL_STOCK_MAX_FAIL_RATIO", "0.10")
+
+    assert cloud_scan_worker.stock_coverage_quality_error({
+        "stocks": 100,
+        "ok": 90,
+        "fail": 10,
+    }) is None
+    assert "above max_fail=10" in cloud_scan_worker.stock_coverage_quality_error({
+        "stocks": 100,
+        "ok": 90,
+        "fail": 11,
+    })
+
+
+def test_validate_stock_coverage_returns_failure_for_bad_payload(tmp_path):
+    path = tmp_path / "coverage.json"
+    path.write_text('{"stocks": 108, "ok": 80, "fail": 28}', encoding="utf-8")
+
+    assert cloud_scan_worker.validate_stock_coverage(path) == cloud_scan_worker.STOCK_COVERAGE_FAIL_EXIT_CODE

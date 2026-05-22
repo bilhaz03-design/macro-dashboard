@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -60,6 +61,9 @@ FRESH_SCAN_DEDUPE_WINDOWS = {
     "etf": ("SWING_TERMINAL_DEDUPE_ETF_MINUTES", 10),
     "stocks": ("SWING_TERMINAL_DEDUPE_STOCKS_MINUTES", 45),
 }
+
+STOCK_COVERAGE_PATH = DATA_DIR / "stock_framework_current_scan_coverage.json"
+STOCK_COVERAGE_FAIL_EXIT_CODE = 4
 
 
 def now_stockholm() -> datetime:
@@ -117,6 +121,17 @@ def parse_positive_int_env(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def parse_ratio_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if 0 <= value <= 1 else default
+
+
 def dedupe_window_minutes(mode: str) -> int | None:
     spec = FRESH_SCAN_DEDUPE_WINDOWS.get(mode)
     if not spec:
@@ -172,6 +187,44 @@ def fresh_scan_skip_reason(
 
     run_id = row.get("run_id") or "unknown-run"
     return f"fresh {mode} OK run {age_minutes}m ago (window={window_minutes}m, run_id={run_id})"
+
+
+def stock_coverage_quality_error(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return "coverage payload missing or malformed"
+    try:
+        stocks = int(payload.get("stocks") or 0)
+        ok = int(payload.get("ok") or 0)
+        fail = int(payload.get("fail") or 0)
+    except (TypeError, ValueError):
+        return "coverage counts are not numeric"
+    if stocks <= 0:
+        return "coverage has no stock universe size"
+
+    min_ok_ratio = parse_ratio_env("SWING_TERMINAL_STOCK_MIN_OK_RATIO", 0.95)
+    max_fail_ratio = parse_ratio_env("SWING_TERMINAL_STOCK_MAX_FAIL_RATIO", 0.05)
+    min_ok = math.ceil(stocks * min_ok_ratio)
+    max_fail = math.floor(stocks * max_fail_ratio)
+    if ok < min_ok:
+        return f"ok={ok} below min_ok={min_ok} ({min_ok_ratio:.0%} of {stocks})"
+    if fail > max_fail:
+        return f"fail={fail} above max_fail={max_fail} ({max_fail_ratio:.0%} of {stocks})"
+    return None
+
+
+def validate_stock_coverage(path: Path = STOCK_COVERAGE_PATH) -> int:
+    payload = load_json(path, None)
+    error = stock_coverage_quality_error(payload)
+    if error:
+        print(f"[cloud_scan_worker] stock coverage FAIL: {error}", file=sys.stderr, flush=True)
+        return STOCK_COVERAGE_FAIL_EXIT_CODE
+    assert isinstance(payload, dict)
+    print(
+        "[cloud_scan_worker] stock coverage OK: "
+        f"ok={payload.get('ok')} fail={payload.get('fail')} stocks={payload.get('stocks')} current={payload.get('current')}",
+        flush=True,
+    )
+    return 0
 
 
 def run(cmd: list[str]) -> int:
@@ -283,7 +336,7 @@ def artifact_scan_date(artifact_key: str, path: Path, fallback: str | None) -> s
 def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
     latest = load_json(DATA_DIR / "latest-signals.json", {})
     stock_journal = load_json(DATA_DIR / "stock-signal-journal.json", {})
-    stock_coverage = load_json(DATA_DIR / "stock_framework_current_scan_coverage.json", {})
+    stock_coverage = load_json(STOCK_COVERAGE_PATH, {})
     stock_signals = stock_journal.get("signals", []) if isinstance(stock_journal, dict) else []
     return {
         "run_id": run_id,
@@ -415,6 +468,7 @@ def main() -> int:
 
     if args.mode in {"all", "stocks"} and not args.daily_dry_run:
         exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "stock_current_scan.py")]))
+        exit_code = max(exit_code, validate_stock_coverage())
         stock_inputs = [
             DATA_DIR / "stock_framework_robustness_summary.json",
             DATA_DIR / "stock_framework_walkforward_summary.json",
