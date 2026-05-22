@@ -448,7 +448,19 @@ def publish_state(config: supabase_io.SupabaseConfig, run_summary: dict) -> None
     execution_map = load_json(DATA_DIR / "execution_map.json", {})
     supabase_io.upsert_rows(config, "execution_map", execution_map_rows(execution_map), on_conflict="signal_ticker")
 
+
+def publish_run_summary(config: supabase_io.SupabaseConfig, run_summary: dict) -> None:
     supabase_io.upsert_rows(config, "scan_runs", [run_summary], on_conflict="run_id")
+
+
+def publish_cloud_result(config: supabase_io.SupabaseConfig, run_summary: dict) -> str:
+    if run_summary.get("status") == "OK" and int(run_summary.get("exit_code") or 0) == 0:
+        publish_state(config, run_summary)
+        publish_run_summary(config, run_summary)
+        return "published state to Supabase"
+
+    publish_run_summary(config, run_summary)
+    return "recorded failed run without replacing scanner artifacts"
 
 
 def notify_latest() -> None:
@@ -531,8 +543,8 @@ def main() -> int:
     run_summary = summarize_run(run_id=run_id, mode=args.mode, status=status, exit_code=exit_code)
     if config:
         try:
-            publish_state(config, run_summary)
-            print("[cloud_scan_worker] published state to Supabase", flush=True)
+            publish_message = publish_cloud_result(config, run_summary)
+            print(f"[cloud_scan_worker] {publish_message}", flush=True)
         except supabase_io.SupabaseError as exc:
             print(f"[cloud_scan_worker] publish failed: {exc}", file=sys.stderr, flush=True)
             return max(exit_code, 3)

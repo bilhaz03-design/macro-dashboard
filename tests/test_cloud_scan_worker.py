@@ -260,3 +260,51 @@ def test_validate_etf_coverage_returns_failure_for_bad_payload(tmp_path):
     path.write_text('{"total_scanned": 44, "err_count": 20, "skip_count": 0}', encoding="utf-8")
 
     assert cloud_scan_worker.validate_etf_coverage(path) == cloud_scan_worker.ETF_COVERAGE_FAIL_EXIT_CODE
+
+
+def test_publish_run_summary_writes_only_scan_runs(monkeypatch):
+    config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+    calls = []
+
+    def fake_upsert(config, table, rows, *, on_conflict=None):
+        calls.append((table, rows, on_conflict))
+        return rows
+
+    monkeypatch.setattr(cloud_scan_worker.supabase_io, "upsert_rows", fake_upsert)
+
+    summary = {"run_id": "failed-quality-gate", "status": "FAIL", "exit_code": 5}
+    cloud_scan_worker.publish_run_summary(config, summary)
+
+    assert calls == [("scan_runs", [summary], "run_id")]
+
+
+def test_publish_cloud_result_keeps_artifacts_on_failure(monkeypatch):
+    config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+    calls = []
+
+    monkeypatch.setattr(cloud_scan_worker, "publish_state", lambda config, summary: calls.append("state"))
+    monkeypatch.setattr(cloud_scan_worker, "publish_run_summary", lambda config, summary: calls.append("summary"))
+
+    message = cloud_scan_worker.publish_cloud_result(
+        config,
+        {"run_id": "failed-quality-gate", "status": "FAIL", "exit_code": 5},
+    )
+
+    assert calls == ["summary"]
+    assert "without replacing scanner artifacts" in message
+
+
+def test_publish_cloud_result_publishes_artifacts_on_success(monkeypatch):
+    config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+    calls = []
+
+    monkeypatch.setattr(cloud_scan_worker, "publish_state", lambda config, summary: calls.append("state"))
+    monkeypatch.setattr(cloud_scan_worker, "publish_run_summary", lambda config, summary: calls.append("summary"))
+
+    message = cloud_scan_worker.publish_cloud_result(
+        config,
+        {"run_id": "ok-run", "status": "OK", "exit_code": 0},
+    )
+
+    assert calls == ["state", "summary"]
+    assert message == "published state to Supabase"
