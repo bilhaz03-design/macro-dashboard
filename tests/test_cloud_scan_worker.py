@@ -1,5 +1,5 @@
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -83,3 +83,80 @@ def test_artifact_scan_date_uses_payload_date(tmp_path):
     assert cloud_scan_worker.artifact_scan_date("latest-signals", latest_path, "2026-05-23") == "2026-05-20"
     assert cloud_scan_worker.artifact_scan_date("stock-signal-journal", stock_path, "2026-05-23") == "2026-05-21"
     assert cloud_scan_worker.artifact_scan_date("stock-current-coverage", coverage_path, "2026-05-23") == "2026-05-22"
+
+
+def test_fresh_scan_skip_reason_skips_recent_ok_mode(monkeypatch):
+    config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+
+    monkeypatch.setattr(
+        cloud_scan_worker,
+        "latest_runs",
+        lambda config: [{
+            "run_id": "fresh-etf",
+            "created_at": "2026-05-22T08:55:00+00:00",
+            "mode": "etf",
+            "status": "OK",
+        }],
+    )
+
+    reason = cloud_scan_worker.fresh_scan_skip_reason(
+        config,
+        "etf",
+        now_utc=datetime(2026, 5, 22, 9, 0, tzinfo=timezone.utc),
+    )
+
+    assert "fresh etf OK run 5m ago" in reason
+
+
+def test_fresh_scan_skip_reason_respects_mode_and_failures(monkeypatch):
+    config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+
+    monkeypatch.setattr(
+        cloud_scan_worker,
+        "latest_runs",
+        lambda config: [
+            {
+                "run_id": "fresh-failed-etf",
+                "created_at": "2026-05-22T08:59:00+00:00",
+                "mode": "etf",
+                "status": "FAIL",
+            },
+            {
+                "run_id": "fresh-stocks",
+                "created_at": "2026-05-22T08:58:00+00:00",
+                "mode": "stocks",
+                "status": "OK",
+            },
+        ],
+    )
+
+    assert cloud_scan_worker.fresh_scan_skip_reason(
+        config,
+        "etf",
+        now_utc=datetime(2026, 5, 22, 9, 0, tzinfo=timezone.utc),
+    ) is None
+    assert "fresh stocks OK run 2m ago" in cloud_scan_worker.fresh_scan_skip_reason(
+        config,
+        "stocks",
+        now_utc=datetime(2026, 5, 22, 9, 0, tzinfo=timezone.utc),
+    )
+
+
+def test_fresh_scan_skip_reason_leaves_all_mode_unblocked(monkeypatch):
+    config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+    monkeypatch.setattr(
+        cloud_scan_worker,
+        "latest_runs",
+        lambda config: [{
+            "run_id": "fresh-all",
+            "created_at": "2026-05-22T08:59:00+00:00",
+            "mode": "all",
+            "status": "OK",
+        }],
+    )
+
+    assert cloud_scan_worker.fresh_scan_skip_reason(
+        config,
+        "all",
+        now_utc=datetime(2026, 5, 22, 9, 0, tzinfo=timezone.utc),
+    ) is None

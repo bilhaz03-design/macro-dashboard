@@ -18,7 +18,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -56,6 +56,11 @@ PUBLISHED_TEXT_ARTIFACTS = {
     "stock-data-js": ("stock_data_js", ROOT / "dashboard" / "stock_data.js"),
 }
 
+FRESH_SCAN_DEDUPE_WINDOWS = {
+    "etf": ("SWING_TERMINAL_DEDUPE_ETF_MINUTES", 10),
+    "stocks": ("SWING_TERMINAL_DEDUPE_STOCKS_MINUTES", 45),
+}
+
 
 def now_stockholm() -> datetime:
     return datetime.now(ZoneInfo("Europe/Stockholm"))
@@ -86,6 +91,87 @@ def iso_date_or_none(value: Any) -> str | None:
     except ValueError:
         return None
     return text
+
+
+def parse_ts(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def parse_positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def dedupe_window_minutes(mode: str) -> int | None:
+    spec = FRESH_SCAN_DEDUPE_WINDOWS.get(mode)
+    if not spec:
+        return None
+    env_name, default = spec
+    return parse_positive_int_env(env_name, default)
+
+
+def latest_runs(config: supabase_io.SupabaseConfig, *, limit: int = 24) -> list[dict]:
+    rows = supabase_io.request_json(
+        config,
+        "GET",
+        "scan_runs",
+        query={
+            "select": "run_id,created_at,mode,status,exit_code",
+            "order": "created_at.desc",
+            "limit": str(limit),
+        },
+    )
+    return rows if isinstance(rows, list) else []
+
+
+def mode_matches(row: dict, mode: str) -> bool:
+    row_mode = str(row.get("mode") or "")
+    return row_mode == mode or row_mode == "all"
+
+
+def latest_mode_run(rows: list[dict], mode: str) -> dict | None:
+    return next((row for row in rows if mode_matches(row, mode)), None)
+
+
+def fresh_scan_skip_reason(
+    config: supabase_io.SupabaseConfig,
+    mode: str,
+    *,
+    now_utc: datetime | None = None,
+) -> str | None:
+    window_minutes = dedupe_window_minutes(mode)
+    if window_minutes is None:
+        return None
+
+    row = latest_mode_run(latest_runs(config), mode)
+    if not row or row.get("status") != "OK":
+        return None
+    created_at = parse_ts(row.get("created_at"))
+    if not created_at:
+        return None
+
+    now_utc = now_utc or datetime.now(timezone.utc)
+    age_minutes = int(max(0, (now_utc - created_at).total_seconds()) // 60)
+    if age_minutes > window_minutes:
+        return None
+
+    run_id = row.get("run_id") or "unknown-run"
+    return f"fresh {mode} OK run {age_minutes}m ago (window={window_minutes}m, run_id={run_id})"
 
 
 def run(cmd: list[str]) -> int:
@@ -308,6 +394,15 @@ def main() -> int:
     if config and not args.no_restore:
         restored = restore_state(config)
         print(f"[cloud_scan_worker] restored: {', '.join(restored) if restored else 'none'}", flush=True)
+    if config and not args.force:
+        try:
+            skip_reason = fresh_scan_skip_reason(config, args.mode)
+        except supabase_io.SupabaseError as exc:
+            skip_reason = None
+            print(f"[cloud_scan_worker] fresh-scan dedupe check failed, continuing: {exc}", file=sys.stderr, flush=True)
+        if skip_reason:
+            print(f"[cloud_scan_worker] skip duplicate scheduled scan: {skip_reason}", flush=True)
+            return 0
 
     exit_code = 0
     if args.mode in {"all", "etf"}:
