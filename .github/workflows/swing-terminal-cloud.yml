@@ -94,3 +94,18 @@ jobs:
             args+=(--no-notify)
           fi
           python scripts/cloud_scan_worker.py "${args[@]}"
+
+      - name: Notify Telegram on scanner workflow failure
+        if: ${{ failure() && github.event.inputs.no_notify != 'true' }}
+        shell: bash
+        run: |
+          python scripts/github_failure_notify.py \
+            --workflow "Swing Terminal Cloud Scanner" \
+            --job "scan" \
+            --mode "${{ steps.scan-mode.outputs.mode }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            --event "${{ github.event_name }}" \
+            --actor "${{ github.actor }}" \
+            --sha "${{ github.sha }}" \
+            --extra "schedule=${{ github.event.schedule }}"

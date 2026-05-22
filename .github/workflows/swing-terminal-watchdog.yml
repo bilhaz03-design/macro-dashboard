@@ -71,3 +71,18 @@ jobs:
             args+=(--no-notify)
           fi
           python scripts/cloud_watchdog.py "${args[@]}"
+
+      - name: Notify Telegram on watchdog workflow failure
+        if: ${{ failure() && github.event.inputs.no_notify != 'true' }}
+        shell: bash
+        run: |
+          python scripts/github_failure_notify.py \
+            --workflow "Swing Terminal Cloud Watchdog" \
+            --job "watchdog" \
+            --mode "heartbeat" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --repo "${{ github.repository }}" \
+            --event "${{ github.event_name }}" \
+            --actor "${{ github.actor }}" \
+            --sha "${{ github.sha }}" \
+            --extra "expected=etf:50,stocks:130"
