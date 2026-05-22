@@ -271,6 +271,36 @@ def validate_etf_coverage(path: Path = ETF_SIGNALS_PATH) -> int:
     return 0
 
 
+def failure_kind_for_exit_code(exit_code: int) -> str | None:
+    if exit_code == 0:
+        return None
+    if exit_code == ETF_COVERAGE_FAIL_EXIT_CODE:
+        return "etf_coverage_quality_gate"
+    if exit_code == STOCK_COVERAGE_FAIL_EXIT_CODE:
+        return "stock_coverage_quality_gate"
+    return "scanner_command_failure"
+
+
+def run_failure_payload(mode: str, exit_code: int, latest: Any, stock_coverage: Any) -> dict | None:
+    kind = failure_kind_for_exit_code(exit_code)
+    if not kind:
+        return None
+
+    payload = {
+        "kind": kind,
+        "exit_code": exit_code,
+    }
+    if mode in {"all", "etf"}:
+        etf_error = etf_coverage_quality_error(latest)
+        if etf_error:
+            payload["etf_coverage_error"] = etf_error
+    if mode in {"all", "stocks"}:
+        stock_error = stock_coverage_quality_error(stock_coverage)
+        if stock_error:
+            payload["stock_coverage_error"] = stock_error
+    return payload
+
+
 def run(cmd: list[str]) -> int:
     print(f"[cloud_scan_worker] run: {' '.join(cmd)}", flush=True)
     proc = subprocess.run(cmd, cwd=ROOT, env={**os.environ, "SWING_TERMINAL_ROOT": str(ROOT)})
@@ -382,6 +412,23 @@ def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
     stock_journal = load_json(DATA_DIR / "stock-signal-journal.json", {})
     stock_coverage = load_json(STOCK_COVERAGE_PATH, {})
     stock_signals = stock_journal.get("signals", []) if isinstance(stock_journal, dict) else []
+    payload = {
+        "latest": latest,
+        "stock_signal_memory": {
+            "scan_date": stock_journal.get("scan_date") if isinstance(stock_journal, dict) else None,
+            "active": sum(1 for item in stock_signals if item.get("active")),
+            "total": len(stock_signals),
+        },
+        "stock_current_coverage": {
+            "generated_at": stock_coverage.get("generated_at") if isinstance(stock_coverage, dict) else None,
+            "ok": stock_coverage.get("ok") if isinstance(stock_coverage, dict) else None,
+            "fail": stock_coverage.get("fail") if isinstance(stock_coverage, dict) else None,
+            "current": stock_coverage.get("current") if isinstance(stock_coverage, dict) else None,
+        },
+    }
+    failure = run_failure_payload(mode, exit_code, latest, stock_coverage)
+    if failure:
+        payload["failure"] = failure
     return {
         "run_id": run_id,
         "created_at": supabase_io.utc_now(),
@@ -395,20 +442,7 @@ def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
         "total_scanned": stock_coverage.get("stocks") if mode == "stocks" and isinstance(stock_coverage, dict) else latest.get("total_scanned"),
         "error_count": stock_coverage.get("fail") if mode == "stocks" and isinstance(stock_coverage, dict) else latest.get("err_count"),
         "skip_count": latest.get("skip_count"),
-        "payload": {
-            "latest": latest,
-            "stock_signal_memory": {
-                "scan_date": stock_journal.get("scan_date") if isinstance(stock_journal, dict) else None,
-                "active": sum(1 for item in stock_signals if item.get("active")),
-                "total": len(stock_signals),
-            },
-            "stock_current_coverage": {
-                "generated_at": stock_coverage.get("generated_at") if isinstance(stock_coverage, dict) else None,
-                "ok": stock_coverage.get("ok") if isinstance(stock_coverage, dict) else None,
-                "fail": stock_coverage.get("fail") if isinstance(stock_coverage, dict) else None,
-                "current": stock_coverage.get("current") if isinstance(stock_coverage, dict) else None,
-            },
-        },
+        "payload": payload,
     }
 
 

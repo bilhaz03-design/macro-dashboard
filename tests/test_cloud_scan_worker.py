@@ -262,6 +262,36 @@ def test_validate_etf_coverage_returns_failure_for_bad_payload(tmp_path):
     assert cloud_scan_worker.validate_etf_coverage(path) == cloud_scan_worker.ETF_COVERAGE_FAIL_EXIT_CODE
 
 
+def test_summarize_run_records_quality_failure_reason(monkeypatch):
+    monkeypatch.delenv("SWING_TERMINAL_ETF_MIN_SCANNED", raising=False)
+    monkeypatch.delenv("SWING_TERMINAL_ETF_MAX_ERROR_RATIO", raising=False)
+
+    def fake_load_json(path, default=None):
+        if path == cloud_scan_worker.ETF_SIGNALS_PATH:
+            return {
+                "date": "2026-05-22",
+                "total_scanned": 44,
+                "err_count": 20,
+                "skip_count": 0,
+            }
+        if path == cloud_scan_worker.STOCK_COVERAGE_PATH:
+            return {"stocks": 108, "ok": 108, "fail": 0, "current": 90}
+        return {"scan_date": "2026-05-22", "signals": []}
+
+    monkeypatch.setattr(cloud_scan_worker, "load_json", fake_load_json)
+
+    summary = cloud_scan_worker.summarize_run(
+        run_id="failed-etf-gate",
+        mode="etf",
+        status="FAIL",
+        exit_code=cloud_scan_worker.ETF_COVERAGE_FAIL_EXIT_CODE,
+    )
+
+    failure = summary["payload"]["failure"]
+    assert failure["kind"] == "etf_coverage_quality_gate"
+    assert failure["etf_coverage_error"] == "err_count=20 above max_errors=4 (10% of 44)"
+
+
 def test_publish_run_summary_writes_only_scan_runs(monkeypatch):
     config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
     calls = []

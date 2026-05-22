@@ -72,10 +72,33 @@ def load_supabase_status() -> dict:
     return {
         "ok": True,
         "runs": runs,
+        "latest_issue": load_latest_issue(config, runs),
         "checks": health_summary(checks),
         "watchdog_state": watchdog_state if isinstance(watchdog_state, dict) else {},
         "cloudflare_state": cloudflare_state if isinstance(cloudflare_state, dict) else {},
     }
+
+
+def load_latest_issue(config: supabase_io.SupabaseConfig, runs: list[dict]) -> dict | None:
+    latest_run = next(iter(runs), None)
+    if not latest_run or latest_run.get("status") == "OK":
+        return None
+    run_id = latest_run.get("run_id")
+    if not run_id:
+        return latest_run
+    rows = supabase_io.request_json(
+        config,
+        "GET",
+        "scan_runs",
+        query={
+            "select": "run_id,created_at,mode,status,exit_code,payload",
+            "run_id": f"eq.{run_id}",
+            "limit": "1",
+        },
+    )
+    if isinstance(rows, list) and rows:
+        return rows[0]
+    return latest_run
 
 
 def workflow_runs(repo: str, workflow: str, limit: int) -> dict:
@@ -153,6 +176,11 @@ def build_status(repo: str, github_limit: int) -> dict:
 def has_action_required(status: dict) -> bool:
     if not status.get("supabase", {}).get("ok"):
         return True
+    if status.get("supabase", {}).get("latest_issue"):
+        return True
+    latest_run = next(iter(status.get("supabase", {}).get("runs") or []), {})
+    if latest_run.get("status") and latest_run.get("status") != "OK":
+        return True
     watchdog_window_open = status.get("watchdog_window_open", status.get("watch_window_open"))
     if watchdog_window_open:
         checks = status.get("supabase", {}).get("checks", [])
@@ -177,6 +205,18 @@ def format_minutes(value: int | None) -> str:
     if value < 60:
         return f"{value}m"
     return f"{value // 60}h{value % 60:02d}m"
+
+
+def latest_failure_text(row: dict) -> str:
+    payload = row.get("payload") if isinstance(row, dict) else {}
+    failure = payload.get("failure") if isinstance(payload, dict) else {}
+    if not isinstance(failure, dict):
+        failure = {}
+    detail = failure.get("etf_coverage_error") or failure.get("stock_coverage_error")
+    reason = failure.get("kind") or "unknown_reason"
+    if detail:
+        return f"{reason}: {detail}"
+    return str(reason)
 
 
 def print_text(status: dict) -> None:
@@ -211,6 +251,13 @@ def print_text(status: dict) -> None:
         cloudflare = supabase.get("cloudflare_state") or {}
         cf_detail = cloudflare.get("last_checked_at") or "not deployed / no state yet"
         print(f"  cloudflare_backup={cf_detail}")
+        latest_run = supabase.get("latest_issue") or {}
+        if latest_run:
+            print(
+                f"  latest_run={latest_run.get('mode', '-')} {latest_run.get('status')} "
+                f"exit={latest_run.get('exit_code')} run={latest_run.get('run_id', '-')}"
+            )
+            print(f"  latest_failure={latest_failure_text(latest_run)}")
     print()
 
     print("GitHub Actions")
