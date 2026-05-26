@@ -316,3 +316,32 @@ Still not proven after this section:
 
 - A deployed Cloudflare `/health` response, because no Worker URL is configured yet.
 - A real Cloudflare Cron-triggered stale-run dispatch.
+
+## Cloudflare backup preflight and Supabase secret sync — 2026-05-27 00:00 Europe/Stockholm
+
+Implemented locally:
+
+- Added `scripts/cloudflare_backup_preflight.py`, which checks required GitHub repository secret names for the Cloudflare backup deploy path without printing secret values.
+- The preflight can sync the reusable local `SUPABASE_*` values into GitHub `CF_SUPABASE_*` repository secrets without printing values.
+- Added tests for missing required secrets, ready status, dry-run sync, and missing local env behavior.
+- CI now compiles `scripts/cloudflare_backup_preflight.py` and runs `tests/test_cloudflare_backup_preflight.py`.
+
+Executed:
+
+- Initial preflight reported missing required secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CF_SUPABASE_URL`, `CF_SUPABASE_PUBLISHABLE_KEY`, `CF_SUPABASE_INGEST_TOKEN`, `CF_GITHUB_ACTIONS_TOKEN`.
+- Synced the three reusable Supabase secrets to GitHub repository secrets:
+  - `CF_SUPABASE_URL`
+  - `CF_SUPABASE_PUBLISHABLE_KEY`
+  - `CF_SUPABASE_INGEST_TOKEN`
+- Post-sync preflight reported these remaining required missing secrets:
+  - `CLOUDFLARE_API_TOKEN`
+  - `CLOUDFLARE_ACCOUNT_ID`
+  - `CF_GITHUB_ACTIONS_TOKEN`
+
+Security note:
+
+- I did not copy the broad local `gh auth` token into `CF_GITHUB_ACTIONS_TOKEN`. That should be a least-privilege GitHub token created for workflow dispatch, not the broad local CLI token, unless explicitly approved.
+
+Still not proven after this section:
+
+- Cloudflare deploy, because the Cloudflare credentials and `CF_GITHUB_ACTIONS_TOKEN` are still missing.

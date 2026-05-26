@@ -54,6 +54,7 @@ jobs:
         run: |
           python -m py_compile \
             scripts/cloud_chain_status.py \
+            scripts/cloudflare_backup_preflight.py \
             scripts/cloud_scan_worker.py \
             scripts/cloud_watchdog.py \
             scripts/github_failure_notify.py \
@@ -73,6 +74,7 @@ jobs:
             tests/test_secret_scan.py \
             tests/test_cloud_watchdog.py \
             tests/test_cloud_chain_status.py \
+            tests/test_cloudflare_backup_preflight.py \
             tests/test_stock_data_fetch.py \
             tests/test_export_stock_terminal_data.py \
             tests/test_cloud_scan_worker.py \
