@@ -255,3 +255,19 @@ Still not proven in this section until a post-cleanup GitHub run is observed:
 
 - That the next GitHub `Swing Terminal Test Alert` log is free from the Linux `terminal-notifier` warning.
 - That the Telegram message appears as a push notification on the user's phone screen; GitHub can only prove Telegram API acceptance unless the user confirms phone receipt.
+
+Post-cleanup GitHub verification:
+
+- Commit `76a079e` was pushed to `main`.
+- `Swing Terminal CI` push run `26476246961` completed `success`.
+- `Swing Terminal Safety` push run `26476246959` completed `success`.
+- `Swing Terminal Test Alert` run `26476273029` completed `success`.
+- Test-alert run `26476273029` log contained `[run_scan_notify.py] telegram sent: sendMessage`.
+- Test-alert run `26476273029` log contained `[cloud_scan_worker] recorded test-alert run without replacing scanner artifacts`.
+- Grep of the full run log found no `terminal-notifier` or `Syntax error` warning lines.
+- Strict chain status after run `26476273029` exited `0` at `2026-05-26T23:31:19+02:00` and reported `Action required: no`.
+
+Still not proven after the post-cleanup run:
+
+- Telegram phone-level push/lock-screen delivery. The GitHub log proves Telegram API acceptance; only the user can confirm the phone UI.
+- Backup runner outside GitHub Actions. `cloud_chain_status.py --strict` still reports `cloudflare_backup=not deployed / no state yet` and missing Cloudflare deploy secrets.
