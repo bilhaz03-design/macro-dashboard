@@ -10,6 +10,9 @@ on:
       - "scripts/cloud_watchdog.py"
       - "scripts/cloud_scan_worker.py"
       - "scripts/supabase_io.py"
+  repository_dispatch:
+    types:
+      - swing-terminal-watchdog
   schedule:
     - cron: "28,58 7-21 * * 1-5"
   workflow_dispatch:
