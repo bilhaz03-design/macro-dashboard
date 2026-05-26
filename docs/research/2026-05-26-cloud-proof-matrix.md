@@ -143,3 +143,45 @@ Still not proven after this update:
 - GitHub Actions branch run with `scripts/mlpb_current_trade_gate.py` present and Supabase compressed artifact restore enabled.
 - Managed container/VM provider runtime.
 - Scanner-generated signal message from a real scanner signal.
+
+## GitHub MLPB gate proof update — 2026-05-26 22:06–22:29 Europe/Stockholm
+
+Verified on GitHub Actions branch `improve/mlpb-cloud-gate-20260526`:
+
+- First branch stock run `26472220577` proved the compressed `mlpb-final-events` artifact restored and the MLPB gate script executed.
+- That first branch run also exposed a real gap: the gate had restored the event set, but latest price features were missing for all `68` candidate rows because `data/mlpb_broad_cache` was not available in the clean runner.
+- The gate was hardened to fetch/cache latest OHLCV for current MLPB candidates and to mark rows `NO_TRADE` if latest price features are missing.
+- Focused tests after that hardening passed locally: `45 passed in 0.55s`.
+- Full local suite after that hardening passed: `248 passed in 6.14s`.
+- Second branch stock run `26472652778` completed successfully:
+  - restored `mlpb-final-events`
+  - stock coverage: `ok=108 fail=0 stocks=108 current=88`
+  - MLPB final event set fresh: `0.1h < 18h`
+  - MLPB latest cache coverage: `31/31 fetched=31 failed=0`
+  - MLPB gate wrote `data/mlpb_current_trade_gate.json`
+  - published state to Supabase
+
+Verified on branch `main` after fast-forward merge and push:
+
+- Main stock run `26473031794` completed successfully.
+- Main run evidence:
+  - restored `latest-signals`, journals, live trades, execution map, `mlpb-final-events`, and `mlpb-current-gate`
+  - stock coverage: `ok=108 fail=0 stocks=108 current=88`
+  - MLPB final event set fresh: `0.1h < 18h`
+  - MLPB latest cache coverage: `31/31 fetched=31 failed=0`
+  - MLPB gate wrote `data/mlpb_current_trade_gate.json`
+  - published state to Supabase
+- Post-run healthcheck at `2026-05-26T22:29:48+02:00`:
+  - ETF fresh age `21m/50m`, run `20260526T220725-26472232544`, scanned `44`
+  - stocks fresh age `1m/130m`, run `20260526T222358-26473031794`, scanned `108`
+  - Telegram `OK`
+- Supabase `mlpb-current-gate` after the main run contained:
+  - generated at `2026-05-26T20:28:48`
+  - latest coverage `31/31` tickers and `68/68` candidate rows
+  - labels: `24 NO_TRADE`, `38 WATCH_PULLBACK`, `6 EVENT_BLOCKED`
+  - Prime tiers: `24 FAILED_STRUCTURE`, `30 B_WATCH`, `8 A_WATCH`, `6 EVENT_BLOCKED`
+
+Still not proven after this update:
+
+- Managed container/VM provider runtime outside GitHub Actions.
+- Scanner-generated Telegram message from a real new signal; Telegram send was proven by readiness, but not by a live signal event in this run.
