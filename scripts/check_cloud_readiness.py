@@ -64,9 +64,9 @@ def main() -> int:
     load_default_env()
     cloud_env = Path.home() / ".config" / "swing-terminal" / "cloud.env"
     alerts_env = Path.home() / ".config" / "swing-terminal" / "alerts.env"
-    migration = ROOT / "supabase" / "migrations" / "20260521_swing_terminal_cloud.sql"
-    ingest_migration = ROOT / "supabase" / "migrations" / "20260521_swing_terminal_ingest_rls.sql"
-    render_yaml = ROOT / "render.yaml"
+    migrations_dir = ROOT / "supabase" / "migrations"
+    cloud_migrations = list(migrations_dir.glob("*swing_terminal_cloud_state.sql"))
+    ingest_migrations = list(migrations_dir.glob("*swing_terminal_ingest_rls.sql"))
 
     supabase_url = os.environ.get("SUPABASE_URL")
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY")
@@ -79,9 +79,16 @@ def main() -> int:
     checks: list[tuple[str, bool, str]] = [
         ("cloud.env", cloud_env.exists(), str(cloud_env)),
         ("alerts.env", alerts_env.exists(), str(alerts_env)),
-        ("render.yaml", render_yaml.exists(), str(render_yaml)),
-        ("supabase migration", migration.exists(), str(migration)),
-        ("ingest RLS migration", ingest_migration.exists(), str(ingest_migration)),
+        (
+            "cloud state migration",
+            bool(cloud_migrations),
+            str(cloud_migrations[0]) if cloud_migrations else "missing *swing_terminal_cloud_state.sql",
+        ),
+        (
+            "ingest RLS migration",
+            bool(ingest_migrations),
+            str(ingest_migrations[0]) if ingest_migrations else "missing *swing_terminal_ingest_rls.sql",
+        ),
         ("SUPABASE_URL", usable(supabase_url), "present" if usable(supabase_url) else "missing"),
         ("SUPABASE_PUBLISHABLE_KEY", usable(publishable_key), "present" if usable(publishable_key) else "missing"),
         ("SUPABASE_INGEST_TOKEN", usable(ingest_token), "present" if usable(ingest_token) else "missing"),

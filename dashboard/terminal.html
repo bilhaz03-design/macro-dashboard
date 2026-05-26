@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Swing Terminal — Personal Trading</title>
+    <meta name="theme-color" content="#050609" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="terminal.css?v=20260526-case-qt-v1" />
+  </head>
+  <body>
+    <h1 class="visually-hidden">Swing Terminal</h1>
+    <div id="scan-data-warning" class="scan-data-error" role="alert" aria-live="assertive" hidden></div>
+
+    <header class="statusbar" role="banner">
+      <span class="brand" aria-label="Swing Terminal">Swing Terminal</span>
+      <span class="sep" aria-hidden="true"></span>
+      <span class="stat"><span class="label-pill">SCAN</span><strong id="meta-date">—</strong></span>
+      <span class="stat"><span class="label-pill">@</span><strong id="meta-time">—</strong></span>
+      <span class="stale-badge" id="stale-badge" aria-live="polite"></span>
+      <span class="sep" aria-hidden="true"></span>
+      <span class="stat"><span class="label-pill">N</span><strong id="meta-scanned">0</strong></span>
+      <span class="stat"><span class="label-pill">CAP</span><strong id="meta-cap" class="meta-counter">0</strong></span>
+      <span class="stat"><span class="label-pill">PB</span><strong id="meta-pb" class="meta-counter">0</strong></span>
+      <span class="stat"><span class="label-pill">PB126</span><strong id="meta-pb126" class="meta-counter">0</strong></span>
+      <span class="stat"><span class="label-pill">ERR</span><strong id="meta-errors" class="meta-counter">0</strong></span>
+      <span class="stat"><span class="label-pill">SKIP</span><strong id="meta-skipped" class="dim">0</strong></span>
+      <span class="stat"><span class="label-pill">SRC</span><strong id="meta-source">—</strong></span>
+      <span class="actions">
+        <span class="market-status" id="market-status" title="Marknadsstatus">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="market-status-label">—</span>
+        </span>
+        <span class="live-clock" id="live-clock" aria-label="Live klocka">
+          <span id="live-clock-time">—</span>
+          <span class="tz" id="live-clock-tz">CET</span>
+        </span>
+        <button class="btn" id="btn-reload" type="button">Reload data</button>
+        <a class="btn nav-link" href="/" target="_self">Macro Dash</a>
+      </span>
+    </header>
+
+    <div class="subbar" aria-hidden="false">
+      <span class="doctrine">
+        Doctrine <strong>§5b.2</strong> · PB126 5/5 W2 PASS
+        <span class="subbar-sep" aria-hidden="true">|</span>
+        Sort: <strong id="sort-label" class="subbar-value">ri_rsi asc</strong>
+        <span class="subbar-sep" aria-hidden="true">|</span>
+        Showing <strong id="row-count" class="subbar-value">0</strong>
+      </span>
+      <span class="keybindings-help" aria-label="Kortkommandon">
+        <kbd>j</kbd>/<kbd>k</kbd> nav <span class="kb-sep" aria-hidden="true">·</span>
+        <kbd>r</kbd> reload <span class="kb-sep" aria-hidden="true">·</span>
+        <kbd>/</kbd> sök <span class="kb-sep" aria-hidden="true">·</span>
+        <kbd>Esc</kbd> rensa
+      </span>
+    </div>
+
+    <nav class="viewbar" aria-label="Terminalvyer">
+      <div class="view-tabs" role="tablist" aria-label="Terminal navigation">
+        <button class="view-tab active" type="button" role="tab" aria-selected="true" data-terminal-view="command">Command</button>
+        <button class="view-tab" type="button" role="tab" aria-selected="false" data-terminal-view="scanner">Scanner</button>
+        <button class="view-tab" type="button" role="tab" aria-selected="false" data-terminal-view="stocks">Aktier</button>
+        <button class="view-tab" type="button" role="tab" aria-selected="false" data-terminal-view="signals">Signals</button>
+        <button class="view-tab" type="button" role="tab" aria-selected="false" data-terminal-view="trade">Trade</button>
+        <button class="view-tab" type="button" role="tab" aria-selected="false" data-terminal-view="detail">Detail</button>
+      </div>
+      <span class="view-hint" aria-hidden="true">
+        <kbd>1</kbd> Command <span>·</span>
+        <kbd>2</kbd> Scanner <span>·</span>
+        <kbd>3</kbd> Aktier <span>·</span>
+        <kbd>4</kbd> Signals <span>·</span>
+        <kbd>5</kbd> Trade <span>·</span>
+        <kbd>6</kbd> Detail
+      </span>
+    </nav>
+
+    <main class="workspace" role="main">
+      <section class="panel scanner" aria-labelledby="scanner-title">
+        <div class="panel-header">
+          <h2 id="scanner-title" class="panel-title">ETF Scanner</h2>
+          <span class="meta">Capitulation · Pullback · PB126 · Cross-asset regime</span>
+        </div>
+        <div class="market-deck" id="market-deck" aria-label="Terminalöversikt"></div>
+        <div class="scanner-toolbar" role="toolbar" aria-label="Scanner-filter">
+          <div class="group">
+            <label for="filter-region">REGION</label>
+            <select id="filter-region">
+              <option value="">All</option>
+              <option value="Asien">Asien</option>
+              <option value="Europa">Europa</option>
+              <option value="Latinamerika">Latinamerika</option>
+            </select>
+          </div>
+          <div class="group">
+            <label for="filter-bull">BULL</label>
+            <select id="filter-bull">
+              <option value="">All</option>
+              <option value="yes">Bull-stack</option>
+              <option value="no">Not bull</option>
+            </select>
+          </div>
+          <div class="group">
+            <label for="filter-flag">SIGNAL</label>
+            <select id="filter-flag">
+              <option value="">All</option>
+              <option value="cap">CAP only</option>
+              <option value="pb">PB only</option>
+              <option value="pb126">PB126 only</option>
+              <option value="near">Cap-near (proximal)</option>
+              <option value="pb-near">PB-near (proximal)</option>
+            </select>
+          </div>
+          <div class="group">
+            <label for="filter-search">FIND</label>
+            <input type="search" id="filter-search" placeholder="ticker / name" autocomplete="off" />
+          </div>
+          <div class="group">
+            <label for="filter-regim">REGIM</label>
+            <select id="filter-regim">
+              <option value="">All</option>
+              <option value="bull">Bull-stack only</option>
+              <option value="126">SMA126 zone</option>
+              <option value="bear">Bear</option>
+            </select>
+          </div>
+          <div class="group">
+            <label for="filter-volcap">VOLCAP</label>
+            <select id="filter-volcap">
+              <option value="">All</option>
+              <option value="ok">ATR% &lt;= 4</option>
+              <option value="warn">ATR% &gt; 4 (reduce size)</option>
+            </select>
+          </div>
+          <div class="group">
+            <button class="btn" id="btn-reset-filters" type="button">Reset</button>
+          </div>
+          <div class="group filter-warn" id="filter-warning" hidden aria-live="polite"></div>
+        </div>
+        <div class="panel-body no-padding">
+          <table class="grid" id="scanner-grid" aria-label="ETF scanner-tabell">
+            <thead>
+              <tr>
+                <th class="left" data-sort="ticker" tabindex="0" role="columnheader" aria-sort="none" title="Ticker-symbol">Ticker</th>
+                <th class="left" data-sort="name" tabindex="0" role="columnheader" aria-sort="none">Name</th>
+                <th class="left" data-sort="region" tabindex="0" role="columnheader" aria-sort="none">Reg</th>
+                <th data-sort="regim" tabindex="0" role="columnheader" aria-sort="none" title="Regim: BULL=bull-stack aktiv, 126+=SMA126>SMA252 men ej bull, BEAR=övriga">Regim</th>
+                <th data-sort="bull_stack" tabindex="0" role="columnheader" aria-sort="none">Bull</th>
+                <th data-sort="ri_rvol" tabindex="0" role="columnheader" aria-sort="none" title="Z-score volym vs 63d medel (rullande)">ri_RVOL</th>
+                <th data-sort="ri_rsi" tabindex="0" role="columnheader" aria-sort="ascending" class="sort-active asc" title="Z-score RSI9 vs 252d">ri_RSI</th>
+                <th data-sort="ri_dist252" tabindex="0" role="columnheader" aria-sort="none" title="Z-score avstånd till SMA252">ri_d252</th>
+                <th data-sort="ri_dist21" tabindex="0" role="columnheader" aria-sort="none" title="Z-score avstånd till SMA21">ri_d21</th>
+                <th data-sort="dist_sma126" tabindex="0" role="columnheader" aria-sort="none" title="Avstånd till SMA126 i procent (positivt = över)">d126%</th>
+                <th data-sort="close" tabindex="0" role="columnheader" aria-sort="none">Close</th>
+                <th data-sort="delay_minutes" tabindex="0" role="columnheader" aria-sort="none" title="Datakälla: RT/US RT eller 15 min delayed enligt Yahoo Finance exchange coverage">Data</th>
+                <th data-sort="rsi9" tabindex="0" role="columnheader" aria-sort="none">RSI9</th>
+                <th data-sort="rsi9_delta_1d" tabindex="0" role="columnheader" aria-sort="none" title="RSI9 förändring senaste 1 dag (RSI-points)">Δ1d</th>
+                <th data-sort="rsi9_delta_5d" tabindex="0" role="columnheader" aria-sort="none" title="RSI9 förändring senaste 5 dagar (RSI-points, dead-cat-indikator)">Δ5d</th>
+                <th data-sort="dirvol63" tabindex="0" role="columnheader" aria-sort="none" title="Directional volume z-score 63d - riktad volymsignal">DirVol</th>
+                <th data-sort="atr20_pct" tabindex="0" role="columnheader" aria-sort="none" title="ATR20 som % av kurs - rött om >4% (vol-cap trigger)">ATR%</th>
+                <th data-sort="freshness_score" tabindex="0" role="columnheader" aria-sort="none" title="Senaste signalålder i handelsdagar. Context, inte hårt filter.">Fresh</th>
+                <th data-sort="analog_score" tabindex="0" role="columnheader" aria-sort="none" title="Historiska analoger: fwd21 mean / hit-rate / N. Context, inte hårt filter.">Analog</th>
+                <th data-sort="path_risk_score" tabindex="0" role="columnheader" aria-sort="none" title="Analog path-risk: MAE p10, shakeout-rate och väg innan target.">Path</th>
+                <th data-sort="sig_priority" tabindex="0" role="columnheader" aria-sort="none" title="Aktiv signal (CAP/PB/PB126) + validitetsstatus">Sig</th>
+                <th data-sort="near_score" tabindex="0" role="columnheader" aria-sort="none" title="Närmast grön (sorterar på minst gap till signal). Tecken: ✓=Δ5d>0 (RSI-momentum upp), ✗=Δ5d<=0 (dead-cat-risk)">Near</th>
+              </tr>
+            </thead>
+            <tbody id="scanner-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel stock-panel" aria-labelledby="stock-title">
+        <div class="panel-header">
+          <h2 id="stock-title" class="panel-title">Aktie Scanner</h2>
+          <span class="meta">Bred universe · trade/no trade</span>
+        </div>
+        <div class="stock-guard" id="stock-guard" role="status" aria-live="polite"></div>
+        <div class="stock-deck" id="stock-deck" aria-label="Aktiescanneröversikt"></div>
+        <div class="stock-current" id="stock-current" aria-label="Färska aktiesignaler"></div>
+        <div class="scanner-toolbar stock-toolbar" role="toolbar" aria-label="Aktiefilter">
+          <div class="group">
+            <label for="stock-filter-tier">TIER</label>
+            <select id="stock-filter-tier">
+              <option value="">All</option>
+              <option value="TIER1">Tier 1</option>
+              <option value="TIER1_WARNING">Tier 1 varning</option>
+              <option value="NO_TRADE">No trade</option>
+              <option value="BLOCKED">Blocked</option>
+            </select>
+          </div>
+          <div class="group">
+            <label for="stock-filter-market">MARKET</label>
+            <select id="stock-filter-market">
+              <option value="">All</option>
+              <option value="US">US</option>
+              <option value="SE">SE</option>
+              <option value="EU">EU</option>
+              <option value="HK">HK</option>
+            </select>
+          </div>
+          <div class="group">
+            <label for="stock-filter-action">STATUS</label>
+            <select id="stock-filter-action">
+              <option value="">All</option>
+              <option value="TRADE">Trade</option>
+              <option value="LIVE_REVIEW">Review</option>
+              <option value="WAIT_SIGNAL">Watch</option>
+              <option value="BLOCKED">Blocked</option>
+              <option value="NO_TRADE">No trade</option>
+            </select>
+          </div>
+          <div class="group">
+            <label for="stock-filter-search">FIND</label>
+            <input type="search" id="stock-filter-search" placeholder="ticker / name / group" autocomplete="off" />
+          </div>
+          <div class="group">
+            <button class="btn" id="btn-reset-stock-filters" type="button">Reset aktier</button>
+          </div>
+        </div>
+        <div class="panel-body no-padding">
+          <table class="stock-table" id="stock-grid" aria-label="Aktie scanner-tabell">
+            <thead>
+              <tr>
+                <th class="left">Ticker</th>
+                <th class="left">Name</th>
+                <th>Status</th>
+                <th>Tier</th>
+                <th>Best</th>
+                <th>Q</th>
+                <th>Edge</th>
+                <th>Lift</th>
+                <th>Hit</th>
+                <th>MAE p10</th>
+                <th>Current</th>
+                <th class="left">Blockers</th>
+              </tr>
+            </thead>
+            <tbody id="stock-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <aside class="right-col" aria-label="Verktygspanel">
+        <section class="panel alignment-panel-shell" aria-labelledby="alignment-title">
+          <div class="panel-header">
+            <h2 id="alignment-title" class="panel-title">Signal Alignment</h2>
+            <span class="meta" id="alignment-meta">Top watch</span>
+          </div>
+          <div class="panel-body alignment-panel" id="alignment-panel" aria-live="polite">
+            <div class="detail-empty">Click a row to see signal alignment.</div>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="sizer-title">
+          <div class="panel-header">
+            <h2 id="sizer-title" class="panel-title">Position Sizer</h2>
+            <span class="meta" id="sizer-status">idle</span>
+          </div>
+          <div class="panel-body">
+            <form class="sizer-form" id="sizer-form" autocomplete="off" novalidate>
+              <label for="size-ticker">Ticker</label>
+              <input id="size-ticker" name="ticker" placeholder="229200.KS" required aria-required="true" aria-describedby="sizer-output" />
+
+              <label for="size-entry">Entry</label>
+              <input id="size-entry" name="entry" type="number" step="any" inputmode="decimal" placeholder="12500" required aria-required="true" aria-describedby="sizer-output" />
+
+              <label for="size-stop">Stop</label>
+              <input id="size-stop" name="stop" type="number" step="any" inputmode="decimal" placeholder="11800 (lämna tomt för §5e.1)" aria-describedby="size-stop-help" />
+              <span id="size-stop-help" class="form-help">§5e.1: ingen hård prisstopp. Stop används endast som backtest-referens.</span>
+
+              <label for="size-portfolio">Portfolio</label>
+              <input id="size-portfolio" name="portfolio" type="number" step="any" inputmode="decimal" value="60000" placeholder="60000" required aria-required="true" aria-describedby="sizer-output" />
+
+              <label for="size-risk">Risk %</label>
+              <input id="size-risk" name="risk_pct" type="number" step="0.1" inputmode="decimal" value="1.0" aria-describedby="sizer-output" />
+
+              <label for="size-volcap">Vol cap %</label>
+              <input id="size-volcap" name="vol_cap" type="number" step="0.1" inputmode="decimal" value="4.0" aria-describedby="sizer-output" />
+
+              <div class="actions">
+                <button type="submit" class="btn primary" id="sizer-submit">Calculate position</button>
+              </div>
+            </form>
+            <div class="sizer-output empty" id="sizer-output" role="status" aria-live="polite">No calculation yet.</div>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="feed-title">
+          <div class="panel-header">
+            <h2 id="feed-title" class="panel-title">Decision Feed</h2>
+            <span class="meta" id="feed-meta">Signals · quality · caveats</span>
+          </div>
+          <div class="panel-body feed" id="signal-feed"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="detail-title">
+          <div class="panel-header">
+            <h2 id="detail-title" class="panel-title">Detail</h2>
+            <span class="meta">Click any row</span>
+          </div>
+          <div class="panel-body detail" id="detail-panel">
+            <div class="detail-empty">Click a row in the scanner grid for full instrument detail.</div>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <noscript>
+      <div class="noscript-warning">
+        Swing Terminal kräver JavaScript. Aktivera JS för att se scanner-data.
+      </div>
+    </noscript>
+
+    <script>
+      document.write('<script src="scan_data.js?t=' + Date.now() + '"><\/script>');
+      document.write('<script src="stock_data.js?t=' + Date.now() + '"><\/script>');
+    </script>
+    <script src="terminal.js?v=20260526-case-qt-v1"></script>
+  </body>
+</html>
