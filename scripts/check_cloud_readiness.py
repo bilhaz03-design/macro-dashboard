@@ -76,9 +76,14 @@ def main() -> int:
     telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
-    checks: list[tuple[str, bool, str]] = [
-        ("cloud.env", cloud_env.exists(), str(cloud_env)),
-        ("alerts.env", alerts_env.exists(), str(alerts_env)),
+    checks: list[tuple[str, bool, str]] = []
+    running_in_actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    if not running_in_actions:
+        checks.extend([
+            ("cloud.env", cloud_env.exists(), str(cloud_env)),
+            ("alerts.env", alerts_env.exists(), str(alerts_env)),
+        ])
+    checks.extend([
         (
             "cloud state migration",
             bool(cloud_migrations),
@@ -99,7 +104,7 @@ def main() -> int:
         ),
         ("TELEGRAM_BOT_TOKEN", usable(telegram_token), "present" if usable(telegram_token) else "missing"),
         ("TELEGRAM_CHAT_ID", usable(telegram_chat_id), "present" if usable(telegram_chat_id) else "missing"),
-    ]
+    ])
 
     if usable(service_key) or (usable(publishable_key) and usable(ingest_token)):
         ok, detail = supabase_check()
