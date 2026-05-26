@@ -1,5 +1,6 @@
 name: Swing Terminal Cloud Watchdog
 
+# Push trigger is a guarded smoke fallback when GitHub workflow_dispatch is unavailable.
 on:
   push:
     branches:
