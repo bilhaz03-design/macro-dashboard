@@ -63,6 +63,14 @@ except ImportError:
 from rank_int import rank_int, Z_P70, Z_P85
 
 try:
+    from mlpb_prime_utils import qt_prime_lite, qt_quality
+    _QT_PRIME_AVAILABLE = True
+except Exception:
+    # QT Prime Lite is an analysis layer only. The ETF scanner must keep
+    # producing core signals even if this optional context layer is unavailable.
+    _QT_PRIME_AVAILABLE = False
+
+try:
     from position_size import size_position_conviction, get_fx_rate_to_sek, get_currency
     _SIZING_AVAILABLE = True
 except ImportError:
@@ -156,6 +164,148 @@ def price_gap_state(open_gap_pct: float) -> str:
     if abs_gap >= PRICE_GAP_REVIEW_PCT:
         return "GAP_REVIEW"
     return "OK"
+
+
+def _finite_num(value, digits: int | None = None):
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(out):
+        return None
+    return round(out, digits) if digits is not None else out
+
+
+def compute_etf_qt_prime(close: pd.Series) -> dict:
+    """QT Prime Lite context for ETF rows.
+
+    This is deliberately an analysis layer, not a new trigger. If the optional
+    QT helper is unavailable or warmup is insufficient, core scanner signals
+    still run and the QT fields become UNKNOWN.
+    """
+    unknown = {
+        "available": False,
+        "label": "UNKNOWN",
+        "score": None,
+        "z": None,
+        "z_delta": None,
+        "stretch_pctile": None,
+        "abs_stretch_pctile": None,
+        "phase": "UNKNOWN",
+        "wait_score": None,
+        "wait_label": "UNKNOWN",
+        "confirmation": "UNKNOWN",
+        "post_entry_state": "UNKNOWN",
+        "regime": "UNKNOWN",
+        "reasons": [],
+    }
+    if not _QT_PRIME_AVAILABLE:
+        return {**unknown, "reason": "qt_prime_module_unavailable"}
+    try:
+        qt = qt_prime_lite(close.dropna())
+    except Exception as exc:
+        return {**unknown, "reason": f"qt_prime_error:{type(exc).__name__}"}
+    if qt.empty:
+        return {**unknown, "reason": "qt_prime_no_rows"}
+    latest = qt.iloc[-1]
+    quality = qt_quality(latest)
+    return {
+        "available": bool(quality.get("label") != "UNKNOWN"),
+        "label": quality.get("label", "UNKNOWN"),
+        "score": _finite_num(quality.get("score"), 0),
+        "z": _finite_num(quality.get("z"), 4),
+        "z_delta": _finite_num(quality.get("z_delta"), 4),
+        "stretch_pctile": _finite_num(quality.get("stretch_pctile"), 4),
+        "abs_stretch_pctile": _finite_num(quality.get("abs_stretch_pctile"), 4),
+        "phase": quality.get("phase", "UNKNOWN"),
+        "wait_score": _finite_num(quality.get("wait_score"), 0),
+        "wait_label": quality.get("wait_label", "UNKNOWN"),
+        "confirmation": quality.get("confirmation", "UNKNOWN"),
+        "post_entry_state": quality.get("post_entry_state", "UNKNOWN"),
+        "regime": quality.get("regime", "UNKNOWN"),
+        "reasons": list(quality.get("reasons") or [])[:5],
+    }
+
+
+def etf_case_engine(signals: dict) -> dict:
+    """Human case status: trade candidate / wait-repair / no trade.
+
+    The goal is to avoid two bad extremes: blind auto-trading and over-filtering
+    every setup away. This function does not predict returns; it only structures
+    the next decision step.
+    """
+    active = []
+    if signals.get("cap_trigger"):
+        active.append("CAP")
+    if signals.get("pb126_trigger"):
+        active.append("PB126")
+    if signals.get("pb_trigger"):
+        active.append("PB")
+
+    alignment = signals.get("alignment") or {}
+    best = alignment.get("best") or {}
+    qt = signals.get("qt_prime") or {}
+    blockers: list[str] = []
+    caveats: list[str] = []
+    evidence: list[str] = []
+    next_steps: list[str] = []
+
+    gap_risk = signals.get("gap_risk")
+    if gap_risk == "GAP_BLOCK_REVIEW":
+        blockers.append("large_open_gap")
+    elif gap_risk == "GAP_REVIEW":
+        caveats.append("open_gap_review")
+    if signals.get("volume_trust") == "BLOCKED":
+        blockers.append("volume_unusable")
+
+    qt_label = qt.get("label")
+    qt_phase = qt.get("phase")
+    qt_wait = qt.get("wait_label")
+    qt_confirmation = qt.get("confirmation")
+    if qt_label and qt_label != "UNKNOWN":
+        evidence.append(f"QT {qt_label}/{qt_phase}/{qt_wait}")
+    if qt_label == "QT_BLOCK":
+        caveats.append("qt_timing_block")
+    if qt_wait == "HIGH_WAIT_VALUE":
+        caveats.append("waiting_has_high_value")
+
+    if active:
+        evidence.append("active " + "+".join(active))
+        if blockers:
+            state = "WAIT_REPAIR_NEEDED"
+            label = "Signal finns, men execution/data blockerar"
+            next_steps.extend(["vänta close", "lös blocker", "ny manuell review"])
+        else:
+            state = "TRADE_CANDIDATE"
+            label = "+".join(active) + " candidate"
+            next_steps.extend(["vänta/kräv EOD-hållning om intraday", "kontrollera spread/likviditet", "kontrollera nyheter/event"])
+    elif best.get("state") in {"NEAR", "WATCH"}:
+        state = "WAIT_REPAIR_NEEDED"
+        label = f"{best.get('label', 'Signal')} {best.get('state')}"
+        missing = [str(x) for x in best.get("missing") or []]
+        evidence.append(f"{best.get('label')} {best.get('count')}/{best.get('total')} gap {best.get('gap')}")
+        next_steps.append("vänta på " + ", ".join(missing[:2]) if missing else "vänta på bekräftelse")
+        if qt_confirmation and qt_confirmation != "UNKNOWN":
+            next_steps.append(qt_confirmation)
+    else:
+        state = "NO_TRADE"
+        label = "No trade path"
+        evidence.append("ingen aktiv eller nära signal")
+        next_steps.append("fortsätt bevaka")
+
+    if caveats and state == "TRADE_CANDIDATE":
+        next_steps.append("caveat-review: " + ", ".join(caveats[:3]))
+
+    return {
+        "state": state,
+        "label": label,
+        "active_signals": active,
+        "blockers": blockers,
+        "caveats": caveats,
+        "evidence": evidence[:5],
+        "next": next_steps[:5],
+        "probability_note": "case-status, inte avkastningsprognos",
+    }
 
 # ---------------------------------------------------------------------------
 # Indikatorhjälpare (identisk logik med pullback_validation_unbiased.py)
@@ -1003,6 +1153,7 @@ def eval_signals(df: pd.DataFrame, inst_thresholds: dict | None = None, ticker: 
     ri_rsi63 = rank_int_today(rsi63_series) if len(rsi63_series) else float("nan")
     ri_rsi63_delta_42d = rank_int_today(rsi63_series.diff(42)) if len(rsi63_series) else float("nan")
     freshness = compute_signal_freshness(df, inst_thresholds=inst_thresholds, ticker=ticker)
+    qt_context = compute_etf_qt_prime(df["Close"])
 
     def _num(v: float, d: int = 2) -> str:
         return "N/A" if np.isnan(v) else f"{v:.{d}f}"
@@ -1092,6 +1243,19 @@ def eval_signals(df: pd.DataFrame, inst_thresholds: dict | None = None, ticker: 
         "gap": best_alignment["gap"],
         "missing": best_alignment["missing"],
     }
+    case_engine = etf_case_engine({
+        "cap_trigger": cap_trigger,
+        "pb_trigger": pb_trigger,
+        "pb126_trigger": pb126_trigger,
+        "gap_risk": gap_state,
+        "volume_trust": (
+            "BLOCKED" if volume_block_reason is not None else
+            "PROXY" if inst_thresholds and inst_thresholds.get("volume_source") == "proxy" else
+            "OK"
+        ),
+        "alignment": alignment,
+        "qt_prime": qt_context,
+    })
 
     return {
         "close":               close_val,
@@ -1166,7 +1330,21 @@ def eval_signals(df: pd.DataFrame, inst_thresholds: dict | None = None, ticker: 
         "atr20":               atr20,
         "atr20_pct":           atr20_pct,
         "freshness":           freshness,
+        "qt_prime":            qt_context,
+        "qt_label":            qt_context.get("label"),
+        "qt_score":            qt_context.get("score"),
+        "qt_z":                qt_context.get("z"),
+        "qt_z_delta":          qt_context.get("z_delta"),
+        "qt_stretch_pctile":   qt_context.get("stretch_pctile"),
+        "qt_abs_stretch_pctile": qt_context.get("abs_stretch_pctile"),
+        "qt_phase":            qt_context.get("phase"),
+        "qt_wait_score":       qt_context.get("wait_score"),
+        "qt_wait_label":       qt_context.get("wait_label"),
+        "qt_confirmation":     qt_context.get("confirmation"),
+        "qt_post_entry_state": qt_context.get("post_entry_state"),
+        "qt_regime":           qt_context.get("regime"),
         "alignment":           alignment,
+        "case_engine":         case_engine,
         "manual_checks":       list(MANUAL_TRADE_CHECKS),
         "trade_readiness":     "MANUAL_CHECK_REQUIRED" if (cap_trigger or pb_trigger or pb126_trigger) else "WATCH_ONLY",
     }
@@ -2754,6 +2932,8 @@ def write_signals_json(
             "execution": r.get("execution") or {},
             "manual_checks": list(MANUAL_TRADE_CHECKS),
             "trade_readiness": "MANUAL_CHECK_REQUIRED",
+            "case_engine": s.get("case_engine"),
+            "qt_prime": s.get("qt_prime"),
         }
 
         if do_sizing and not np.isnan(close):
@@ -2929,6 +3109,10 @@ def write_scan_js(
         "execution_ticker", "execution_name", "execution_market", "execution_broker",
         "execution_reason", "execution_manual_checks", "execution_requires_manual_spread_check",
         "manual_checks", "trade_readiness",
+        "qt_prime", "qt_label", "qt_score", "qt_z", "qt_z_delta",
+        "qt_stretch_pctile", "qt_abs_stretch_pctile", "qt_phase",
+        "qt_wait_score", "qt_wait_label", "qt_confirmation",
+        "qt_post_entry_state", "qt_regime", "case_engine",
         "isin", "exchange", "ter", "note", "reason", "analog", "freshness", "alignment", "regime_context",
     )
 
@@ -2949,6 +3133,8 @@ def write_scan_js(
                 "analog": _safe_deep(r.get("analog")),
                 "freshness": _safe_deep(r.get("signals", {}).get("freshness")),
                 "alignment": _safe_deep(r.get("signals", {}).get("alignment")),
+                "qt_prime": _safe_deep(r.get("signals", {}).get("qt_prime")),
+                "case_engine": _safe_deep(r.get("signals", {}).get("case_engine")),
                 "regime_context": _safe_deep(r.get("signals", {}).get("regime_context")),
                 "price_source": q.get("price_source"),
                 "data_latency": q.get("latency"),
@@ -2983,6 +3169,8 @@ def write_scan_js(
                 "analog": _safe_deep(r.get("analog")),
                 "freshness": _safe_deep(r.get("signals", {}).get("freshness")),
                 "alignment": _safe_deep(r.get("signals", {}).get("alignment")),
+                "qt_prime": _safe_deep(r.get("signals", {}).get("qt_prime")),
+                "case_engine": _safe_deep(r.get("signals", {}).get("case_engine")),
                 "regime_context": _safe_deep(r.get("signals", {}).get("regime_context")),
                 "price_source": q.get("price_source"),
                 "data_latency": q.get("latency"),
@@ -3072,7 +3260,21 @@ def write_scan_js(
             "reason": r.get("reason"),
             "analog": _safe_deep(r.get("analog")),
             "freshness": _safe_deep(s.get("freshness")),
+            "qt_prime": _safe_deep(s.get("qt_prime")),
+            "qt_label": s.get("qt_label"),
+            "qt_score": _safe(s.get("qt_score")),
+            "qt_z": _safe(s.get("qt_z")),
+            "qt_z_delta": _safe(s.get("qt_z_delta")),
+            "qt_stretch_pctile": _safe(s.get("qt_stretch_pctile")),
+            "qt_abs_stretch_pctile": _safe(s.get("qt_abs_stretch_pctile")),
+            "qt_phase": s.get("qt_phase"),
+            "qt_wait_score": _safe(s.get("qt_wait_score")),
+            "qt_wait_label": s.get("qt_wait_label"),
+            "qt_confirmation": s.get("qt_confirmation"),
+            "qt_post_entry_state": s.get("qt_post_entry_state"),
+            "qt_regime": s.get("qt_regime"),
             "alignment": _safe_deep(s.get("alignment")),
+            "case_engine": _safe_deep(s.get("case_engine")),
             "regime_context": _safe_deep(s.get("regime_context")),
             "last_close_date": r.get("last_close_date"),
             "sma126_above_sma252": bool(s.get("sma126_above_sma252", False)),

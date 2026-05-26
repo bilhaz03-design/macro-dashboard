@@ -139,6 +139,8 @@ def test_latest_signals_uses_no_hard_stop_conviction(monkeypatch, tmp_path):
     assert sig["stop_policy"] == "no_hard_stop_5e2"
     assert sig["risk_label"] == "smärttröskel_30pct"
     assert sig["position_value_sek"] == 10_000
+    assert "case_engine" in sig
+    assert "qt_prime" in sig
 
 
 def test_latest_signals_counts_pb126(monkeypatch, tmp_path):
@@ -255,6 +257,61 @@ def test_price_gap_state_thresholds():
     assert daily_scan.price_gap_state(0.5) == "OK"
     assert daily_scan.price_gap_state(-3.2) == "GAP_REVIEW"
     assert daily_scan.price_gap_state(7.2) == "GAP_BLOCK_REVIEW"
+
+
+def test_etf_case_engine_keeps_signals_as_candidates_not_autobuy():
+    out = daily_scan.etf_case_engine({
+        "cap_trigger": False,
+        "pb126_trigger": True,
+        "pb_trigger": False,
+        "gap_risk": "OK",
+        "volume_trust": "OK",
+        "alignment": {"best": {"label": "PB126", "state": "GREEN", "count": 4, "total": 4, "gap": 0.0}},
+        "qt_prime": {"label": "QT_SUPPORT", "phase": "REPAIRING", "wait_label": "LOW_WAIT_VALUE"},
+    })
+
+    assert out["state"] == "TRADE_CANDIDATE"
+    assert "EOD" in " ".join(out["next"])
+    assert out["probability_note"] == "case-status, inte avkastningsprognos"
+
+
+def test_etf_case_engine_downgrades_large_gap_to_wait_repair():
+    out = daily_scan.etf_case_engine({
+        "cap_trigger": True,
+        "pb126_trigger": False,
+        "pb_trigger": False,
+        "gap_risk": "GAP_BLOCK_REVIEW",
+        "volume_trust": "OK",
+        "alignment": {"best": {"label": "CAP", "state": "GREEN", "count": 3, "total": 3, "gap": 0.0}},
+        "qt_prime": {"label": "QT_SUPPORT", "phase": "REPAIRING", "wait_label": "LOW_WAIT_VALUE"},
+    })
+
+    assert out["state"] == "WAIT_REPAIR_NEEDED"
+    assert "large_open_gap" in out["blockers"]
+
+
+def test_etf_case_engine_marks_near_miss_as_wait_repair():
+    out = daily_scan.etf_case_engine({
+        "cap_trigger": False,
+        "pb126_trigger": False,
+        "pb_trigger": False,
+        "gap_risk": "OK",
+        "volume_trust": "OK",
+        "alignment": {
+            "best": {
+                "label": "PB126",
+                "state": "NEAR",
+                "count": 3,
+                "total": 4,
+                "gap": 0.25,
+                "missing": ["Buy volume"],
+            }
+        },
+        "qt_prime": {"label": "QT_NEUTRAL", "phase": "STABILIZING", "wait_label": "MEDIUM_WAIT_VALUE", "confirmation": "EOD_HOLD_OR_RECLAIM"},
+    })
+
+    assert out["state"] == "WAIT_REPAIR_NEEDED"
+    assert "Buy volume" in " ".join(out["next"])
 
 
 def test_load_execution_map(tmp_path):
