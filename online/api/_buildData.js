@@ -97,15 +97,15 @@ export async function buildData() {
   );
   const unemployment = extractNumber(
     scbLfsText,
-    /Unemployment rate\\s*\\n?\\s*([0-9.]+)\\s*%/i
+    /Unemployment rate\s*\n?\s*([0-9.]+)\s*%/i
   );
   const gdpMom = extractNumber(
     scbGdpText,
-    /monthly GDP indicator[^.]*?(-?[0-9.]+)\\s*percent/i
+    /monthly GDP indicator[^.]*?(-?[0-9.]+)\s*percent/i
   );
   const policyRate = extractNumber(
     riksText,
-    /policy rate[^0-9]*([0-9.]+)\\s*per\\s*cent/i
+    /policy rate[^0-9]*([0-9.]+)\s*per\s*cent/i
   );
   const swedenPmi =
     extractNumber(swedenPmiText, /Manufacturing PMI[^0-9]*([0-9.]+)/i) ??
@@ -115,21 +115,21 @@ export async function buildData() {
     extractNumber(nierText, /ETI[^0-9]*([0-9.]+)/i);
 
   // China parsing
-  const retailDec = extractNumber(retailText, /up by\\s*([0-9.]+)%\\s*year on year/i);
-  const retail2025 = extractNumber(retailText, /In 2025[^.]*up by\\s*([0-9.]+)%/i);
-  const industryDec = extractNumber(industryText, /increased by\\s*([0-9.]+)\\s*percent/i);
-  const industry2025 = extractNumber(industryText, /expanded\\s*([0-9.]+)\\s*percent year on year in 2025/i);
-  const cpi = extractNumber(cpiText, /CPI[^0-9]*([0-9.]+)\\s*percent/i);
+  const retailDec = extractNumber(retailText, /up by\s*([0-9.]+)%\s*year on year/i);
+  const retail2025 = extractNumber(retailText, /In 2025[^.]*up by\s*([0-9.]+)%/i);
+  const industryDec = extractNumber(industryText, /increased by\s*([0-9.]+)\s*percent/i);
+  const industry2025 = extractNumber(industryText, /expanded\s*([0-9.]+)\s*percent year on year in 2025/i);
+  const cpi = extractNumber(cpiText, /CPI[^0-9]*([0-9.]+)\s*percent/i);
   let property =
     extractNumber(propertyText, /real estate investment[^0-9-]*(-?[0-9.]+)%/i) ??
-    extractNumber(propertyText, /real estate investment[^0-9-]*(-?[0-9.]+)\\s*percent/i) ??
-    extractNumber(propertyText, /real estate investment[^.]*?(-?[0-9.]+)\\s*%/i);
+    extractNumber(propertyText, /real estate investment[^0-9-]*(-?[0-9.]+)\s*percent/i) ??
+    extractNumber(propertyText, /real estate investment[^.]*?(-?[0-9.]+)\s*%/i);
   if (property != null && property > 0 && /declin|drop|fall|decrease|down/i.test(propertyText)) {
     property = -property;
   }
-  const tsf = extractNumber(tsfText, /outstanding.*?([0-9.]+)\\s*percent/i);
+  const tsf = extractNumber(tsfText, /outstanding.*?([0-9.]+)\s*percent/i);
 
-  const swInflationStatus = statusFromValue(cpif, { good: 1.0, neutral: 0.0 });
+  const swInflationStatus = cpif == null ? "Neutral" : cpif > 3.0 ? "Weak" : cpif >= 1.0 ? "Good" : cpif >= 0.0 ? "Neutral" : "Weak";
   const cnConsumptionStatus = statusFromValue(retailDec, { good: 5.0, neutral: 2.0 });
   const cnIndustryStatus = statusFromValue(industryDec, { good: 6.0, neutral: 3.0 });
   const cnInflationStatus = statusFromValue(cpi, { good: 1.0, neutral: 0.0 });
@@ -327,12 +327,16 @@ export async function buildData() {
           {
             label: "Property",
             label_sv: "Fastigheter",
-            status: property != null && property > 10 ? "Weak" : "Neutral",
-            status_sv: property != null && property > 10 ? "Svag" : "Neutral",
-            detail: `Real estate investment -${property ?? "n/a"}% y/y`,
-            detail_sv: `Fastighetsinvesteringar -${property ?? "n/a"}% y/y`,
+            status: property != null && property < -10 ? "Weak" : "Neutral",
+            status_sv: property != null && property < -10 ? "Svag" : "Neutral",
+            detail: property != null
+              ? `Real estate investment -${Math.abs(property)}% y/y`
+              : "Real estate investment n/a",
+            detail_sv: property != null
+              ? `Fastighetsinvesteringar -${Math.abs(property)}% y/y`
+              : "Fastighetsinvesteringar n/a",
             sources: [{ label: "NBS", url: nbsPropertyUrl }],
-            trend: property ? [-property + 2.0, -property + 1.0, -property + 0.5, -property] : [],
+            trend: property ? [property + 2.0, property + 1.0, property + 0.5, property] : [],
           },
           {
             label: "Credit",

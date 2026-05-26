@@ -58,12 +58,15 @@ jobs:
           cache: "pip"
           cache-dependency-path: requirements-cloud.txt
 
-      - name: Restore stock price cache
+      - name: Restore price caches
         uses: actions/cache@v4
         with:
-          path: data/stock_cache
-          key: swing-stock-cache-${{ runner.os }}-${{ github.run_number }}
+          path: |
+            data/stock_cache
+            data/mlpb_broad_cache
+          key: swing-price-cache-${{ runner.os }}-${{ github.run_number }}
           restore-keys: |
+            swing-price-cache-${{ runner.os }}-
             swing-stock-cache-${{ runner.os }}-
 
       - name: Install scanner dependencies

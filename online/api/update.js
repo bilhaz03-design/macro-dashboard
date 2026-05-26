@@ -1,4 +1,12 @@
+import { buildData } from './_buildData.js';
 import { snapshot } from './_snapshot.js';
+
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
 
 export default async function handler(req, res) {
   const token = req.query.token;
@@ -8,15 +16,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const host = req.headers.host;
-    const response = await fetch(`https://${host}/api/data`);
-    const data = await response.json();
-    data.last_updated = new Date().toISOString().slice(0, 10);
+    // Rebuild data directly to avoid host-header based SSRF and stale-as-fresh responses.
+    const data = await withTimeout(buildData(), 7500);
     res.setHeader('Content-Type', 'application/json');
     res.status(200).json(data);
   } catch (_err) {
-    const data = { ...snapshot, last_updated: new Date().toISOString().slice(0, 10) };
+    // Return stale snapshot with its original last_updated date and a 503 status
     res.setHeader('Content-Type', 'application/json');
-    res.status(200).json(data);
+    res.setHeader('X-Served-From', 'snapshot');
+    res.status(503).json(snapshot);
   }
 }

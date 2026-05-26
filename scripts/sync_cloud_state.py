@@ -24,6 +24,8 @@ JSON_ARTIFACTS = {
     "live-trades": DATA_DIR / "live-trades.json",
     "execution-map": DATA_DIR / "execution_map.json",
     "stock-current-coverage": DATA_DIR / "stock_framework_current_scan_coverage.json",
+    "mlpb-final-events": DATA_DIR / "mlpb_final_falsification_events.json",
+    "mlpb-current-gate": DATA_DIR / "mlpb_current_trade_gate.json",
 }
 
 TEXT_ARTIFACTS = {

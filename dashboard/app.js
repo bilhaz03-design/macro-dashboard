@@ -80,8 +80,11 @@ const i18n = {
   },
 };
 
+const STATUS_CLASSES = ["status-good", "status-neutral", "status-weak"];
+
 function setStatusBadge(el, label) {
   el.textContent = label;
+  STATUS_CLASSES.forEach(c => el.classList.remove(c));
   const cls = statusClass[label] || "status-neutral";
   el.classList.add(cls);
 }
@@ -146,7 +149,7 @@ function renderCountry(country) {
     const detail = blockNode.querySelector(".block-detail");
     detail.textContent = getField(block, "detail");
     const sparkTarget = blockNode.querySelector(".block-sparkline");
-    if (block.trend && block.trend.length) {
+    if (block.trend && block.trend.length >= 2) {
       const svg = renderSparkline(block.trend);
       sparkTarget.appendChild(svg);
     } else {
@@ -307,8 +310,7 @@ function applyStaticLabels() {
 function setupUpdateButton() {
   const button = document.getElementById("update-button");
   if (!button) return;
-  const cmd =
-    "/Users/bobbo/Desktop/Finans\\ Projects/.venv/bin/python /Users/bobbo/Desktop/Finans\\ Projects/scripts/update_dashboard.py";
+  const cmd = ".venv/bin/python scripts/update_dashboard.py";
   button.addEventListener("click", async () => {
     try {
       const response = await fetch("/update", { method: "POST" });
@@ -347,7 +349,11 @@ loadData()
   .catch((err) => {
     console.error(err);
     const grid = document.getElementById("country-grid");
-    grid.innerHTML = `<div class="panel">Failed to load data. ${err.message}</div>`;
+    const msg = document.createElement("div");
+    msg.className = "panel";
+    msg.textContent = `Failed to load data. ${err.message}`;
+    grid.innerHTML = "";
+    grid.appendChild(msg);
   });
 
 function renderSparkline(values) {

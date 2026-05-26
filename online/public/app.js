@@ -160,7 +160,7 @@ function renderCountry(country) {
     const detail = blockNode.querySelector(".block-detail");
     detail.textContent = getField(block, "detail");
     const sparkTarget = blockNode.querySelector(".block-sparkline");
-    if (block.trend && block.trend.length) {
+    if (block.trend && block.trend.length >= 2) {
       const svg = renderSparkline(block.trend);
       sparkTarget.appendChild(svg);
     } else {
@@ -360,7 +360,11 @@ loadData()
   .catch((err) => {
     console.error(err);
     const grid = document.getElementById("country-grid");
-    grid.innerHTML = `<div class="panel">Failed to load data. ${err.message}</div>`;
+    const msg = document.createElement("div");
+    msg.className = "panel";
+    msg.textContent = `Failed to load data. ${err.message}`;
+    grid.innerHTML = "";
+    grid.appendChild(msg);
   });
 
 function renderMap(countries) {
@@ -461,6 +465,7 @@ function renderMap(countries) {
 }
 
 function renderSparkline(values) {
+  if (!values || values.length < 2) return null;
   const width = 120;
   const height = 36;
   const padding = 4;

@@ -160,7 +160,7 @@ function renderCountry(country) {
     const detail = blockNode.querySelector(".block-detail");
     detail.textContent = getField(block, "detail");
     const sparkTarget = blockNode.querySelector(".block-sparkline");
-    if (block.trend && block.trend.length) {
+    if (block.trend && block.trend.length >= 2) {
       const svg = renderSparkline(block.trend);
       sparkTarget.appendChild(svg);
     } else {
@@ -231,12 +231,12 @@ function renderDashboard(data) {
     : getField(data.system_status, "note") ?? "";
 
   const globalRisk = document.getElementById("global-risk");
-  setStatusBadge(globalRisk, data.global_risk.status);
+  setStatusBadge(globalRisk, data.global_risk?.status ?? "--");
   const globalRiskNote = document.getElementById("global-risk-note");
   globalRiskNote.textContent = getField(data.global_risk, "note");
   const globalRiskSources = document.getElementById("global-risk-sources");
   globalRiskSources.innerHTML = "";
-  if (data.global_risk.sources && data.global_risk.sources.length) {
+  if (data.global_risk?.sources && data.global_risk.sources.length) {
     data.global_risk.sources.forEach((source) => {
       const link = document.createElement("a");
       link.href = source.url;
@@ -364,7 +364,11 @@ loadData()
   .catch((err) => {
     console.error(err);
     const grid = document.getElementById("country-grid");
-    grid.innerHTML = `<div class="panel">Failed to load data. ${err.message}</div>`;
+    const msg = document.createElement("div");
+    msg.className = "panel";
+    msg.textContent = `Failed to load data. ${err.message}`;
+    grid.innerHTML = "";
+    grid.appendChild(msg);
   });
 
 function renderMap(countries) {
@@ -432,6 +436,7 @@ function renderMap(countries) {
 }
 
 function renderSparkline(values) {
+  if (!values || values.length < 2) return null;
   const width = 120;
   const height = 36;
   const padding = 4;

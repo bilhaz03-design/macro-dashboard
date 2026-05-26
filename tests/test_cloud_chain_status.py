@@ -117,3 +117,19 @@ def test_format_minutes_is_compact():
     assert cloud_chain_status.format_minutes(None) == "unknown"
     assert cloud_chain_status.format_minutes(4) == "4m"
     assert cloud_chain_status.format_minutes(130) == "2h10m"
+
+
+def test_build_status_includes_notification_health(monkeypatch):
+    monkeypatch.setattr(cloud_chain_status, "load_default_env", lambda: None)
+    monkeypatch.setattr(cloud_chain_status, "load_supabase_status", lambda: {"ok": True, "runs": [], "checks": []})
+    monkeypatch.setattr(cloud_chain_status, "load_github_status", lambda repo, limit: {})
+    monkeypatch.setattr(
+        cloud_chain_status.run_scan_notify,
+        "notification_health",
+        lambda: {"cloud_ready": True, "channel": "telegram"},
+    )
+
+    status = cloud_chain_status.build_status("owner/repo", 1)
+
+    assert status["notification"]["cloud_ready"] is True
+    assert status["notification"]["channel"] == "telegram"

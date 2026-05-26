@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import cloud_scan_worker  # noqa: E402
 import cloud_watchdog  # noqa: E402
+import run_scan_notify  # noqa: E402
 import supabase_io  # noqa: E402
 from env_loader import load_default_env  # noqa: E402
 
@@ -164,6 +165,7 @@ def build_status(repo: str, github_limit: int) -> dict:
         "watchdog_window_open": cloud_watchdog.in_watch_window(local_now),
         "watch_window_open": cloud_watchdog.in_watch_window(local_now),
         "env": env_status(),
+        "notification": run_scan_notify.notification_health(),
     }
     try:
         status["supabase"] = load_supabase_status()
@@ -232,6 +234,11 @@ def print_text(status: dict) -> None:
         if name.startswith("CLOUDFLARE") and not ok:
             note = " (only needed for backup Worker deploy)"
         print(f"  {name:<26} {format_bool(ok)}{note}")
+    notify = status.get("notification") or {}
+    print(
+        f"  {'NOTIFY_CLOUD_READY':<26} {format_bool(bool(notify.get('cloud_ready')))} "
+        f"(channel={notify.get('channel', 'unknown')})"
+    )
     print()
 
     supabase = status.get("supabase", {})

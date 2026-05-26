@@ -49,6 +49,10 @@ jobs:
             scripts/cloud_scan_worker.py \
             scripts/cloud_watchdog.py \
             scripts/github_failure_notify.py \
+            scripts/mlpb_current_trade_gate.py \
+            scripts/mlpb_final_falsification_research.py \
+            scripts/mlpb_prime_framework_research.py \
+            scripts/mlpb_prime_utils.py \
             scripts/run_scan_notify.py \
             scripts/secret_scan.py \
             scripts/stock_current_scan.py \
@@ -65,6 +69,8 @@ jobs:
             tests/test_export_stock_terminal_data.py \
             tests/test_cloud_scan_worker.py \
             tests/test_github_failure_notify.py \
+            tests/test_mlpb_current_trade_gate.py \
+            tests/test_mlpb_prime_utils.py \
             tests/test_supabase_io.py \
             tests/test_run_scan_notify.py \
             tests/test_env_loader.py
