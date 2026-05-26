@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -153,7 +154,35 @@ def env_status() -> dict:
         "TELEGRAM_CHAT_ID": usable_secret(os.environ.get("TELEGRAM_CHAT_ID")),
         "CLOUDFLARE_API_TOKEN": usable_secret(os.environ.get("CLOUDFLARE_API_TOKEN")),
         "CLOUDFLARE_ACCOUNT_ID": usable_secret(os.environ.get("CLOUDFLARE_ACCOUNT_ID")),
+        "CLOUDFLARE_BACKUP_HEALTH_URL": bool(os.environ.get("CLOUDFLARE_BACKUP_HEALTH_URL")),
     }
+
+
+def load_cloudflare_health(url: str | None = None, urlopen_fn=urllib.request.urlopen) -> dict:
+    url = url or os.environ.get("CLOUDFLARE_BACKUP_HEALTH_URL", "")
+    if not url:
+        return {"configured": False, "ok": False, "detail": "not configured"}
+    try:
+        request = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urlopen_fn(request, timeout=10) as response:
+            body = response.read(200_000).decode("utf-8", errors="replace")
+            payload = json.loads(body)
+            ready = bool(payload.get("ready"))
+            ok = bool(payload.get("ok")) and ready
+            return {
+                "configured": True,
+                "ok": ok,
+                "status": getattr(response, "status", None),
+                "ready": ready,
+                "missing": payload.get("missingRequiredEnv") if isinstance(payload, dict) else None,
+                "payload": payload if isinstance(payload, dict) else {},
+            }
+    except Exception as exc:
+        return {
+            "configured": True,
+            "ok": False,
+            "detail": f"{type(exc).__name__}: {str(exc).splitlines()[0][:180]}",
+        }
 
 
 def build_status(repo: str, github_limit: int) -> dict:
@@ -167,6 +196,7 @@ def build_status(repo: str, github_limit: int) -> dict:
         "watch_window_open": cloud_watchdog.in_watch_window(local_now),
         "env": env_status(),
         "notification": run_scan_notify.notification_health(),
+        "cloudflare_health": load_cloudflare_health(),
     }
     try:
         status["supabase"] = load_supabase_status()
@@ -195,6 +225,9 @@ def has_action_required(status: dict) -> bool:
         latest = (payload.get("runs") or [{}])[0]
         if workflow != "Deploy Cloudflare Backup Clock" and latest.get("conclusion") == "failure":
             return True
+    cloudflare_health = status.get("cloudflare_health") or {}
+    if cloudflare_health.get("configured") and not cloudflare_health.get("ok"):
+        return True
     return False
 
 
@@ -232,7 +265,9 @@ def print_text(status: dict) -> None:
     print("Secrets/config")
     for name, ok in status["env"].items():
         note = ""
-        if name.startswith("CLOUDFLARE") and not ok:
+        if name == "CLOUDFLARE_BACKUP_HEALTH_URL" and not ok:
+            note = " (optional after backup Worker deploy)"
+        elif name.startswith("CLOUDFLARE") and not ok:
             note = " (only needed for backup Worker deploy)"
         print(f"  {name:<26} {format_bool(ok)}{note}")
     notify = status.get("notification") or {}
@@ -259,6 +294,12 @@ def print_text(status: dict) -> None:
         cloudflare = supabase.get("cloudflare_state") or {}
         cf_detail = cloudflare.get("last_checked_at") or "not deployed / no state yet"
         print(f"  cloudflare_backup={cf_detail}")
+        cf_health = status.get("cloudflare_health") or {}
+        if cf_health.get("configured"):
+            cf_text = "OK" if cf_health.get("ok") else f"NOT_READY {cf_health.get('detail') or cf_health.get('missing') or ''}".strip()
+            print(f"  cloudflare_health={cf_text}")
+        else:
+            print("  cloudflare_health=not configured")
         latest_run = supabase.get("latest_issue") or {}
         if latest_run:
             print(

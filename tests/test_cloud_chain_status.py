@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
@@ -61,6 +62,28 @@ def test_action_required_flags_failed_core_workflow():
     assert cloud_chain_status.has_action_required(status) is True
 
 
+def test_action_required_flags_configured_bad_cloudflare_health():
+    status = {
+        "watch_window_open": False,
+        "supabase": {"ok": True, "checks": []},
+        "github": {},
+        "cloudflare_health": {"configured": True, "ok": False},
+    }
+
+    assert cloud_chain_status.has_action_required(status) is True
+
+
+def test_action_required_ignores_unconfigured_cloudflare_health():
+    status = {
+        "watch_window_open": False,
+        "supabase": {"ok": True, "checks": []},
+        "github": {},
+        "cloudflare_health": {"configured": False, "ok": False},
+    }
+
+    assert cloud_chain_status.has_action_required(status) is False
+
+
 def test_action_required_flags_latest_failed_supabase_run():
     status = {
         "watch_window_open": False,
@@ -119,10 +142,48 @@ def test_format_minutes_is_compact():
     assert cloud_chain_status.format_minutes(130) == "2h10m"
 
 
+def test_load_cloudflare_health_not_configured():
+    assert cloud_chain_status.load_cloudflare_health("") == {
+        "configured": False,
+        "ok": False,
+        "detail": "not configured",
+    }
+
+
+def test_load_cloudflare_health_ready():
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = b'{"ok": true, "ready": true, "missingRequiredEnv": []}'
+    response.__enter__.return_value = response
+    response.__exit__.return_value = False
+
+    status = cloud_chain_status.load_cloudflare_health("https://worker.example/health", lambda *args, **kwargs: response)
+
+    assert status["configured"] is True
+    assert status["ok"] is True
+    assert status["ready"] is True
+    assert status["missing"] == []
+
+
+def test_load_cloudflare_health_not_ready():
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = b'{"ok": true, "ready": false, "missingRequiredEnv": ["GITHUB_ACTIONS_TOKEN"]}'
+    response.__enter__.return_value = response
+    response.__exit__.return_value = False
+
+    status = cloud_chain_status.load_cloudflare_health("https://worker.example/health", lambda *args, **kwargs: response)
+
+    assert status["configured"] is True
+    assert status["ok"] is False
+    assert status["missing"] == ["GITHUB_ACTIONS_TOKEN"]
+
+
 def test_build_status_includes_notification_health(monkeypatch):
     monkeypatch.setattr(cloud_chain_status, "load_default_env", lambda: None)
     monkeypatch.setattr(cloud_chain_status, "load_supabase_status", lambda: {"ok": True, "runs": [], "checks": []})
     monkeypatch.setattr(cloud_chain_status, "load_github_status", lambda repo, limit: {})
+    monkeypatch.setattr(cloud_chain_status, "load_cloudflare_health", lambda: {"configured": False, "ok": False})
     monkeypatch.setattr(
         cloud_chain_status.run_scan_notify,
         "notification_health",

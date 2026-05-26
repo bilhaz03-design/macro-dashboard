@@ -294,3 +294,25 @@ Still not proven after this section:
 - A real Cloudflare deploy, because `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are not configured locally/GitHub-side in the current evidence.
 - A deployed Worker `/health` HTTP response from Cloudflare.
 - A real Cloudflare Cron-triggered stale-run dispatch.
+
+## Backup Worker deployed-health checker — 2026-05-26 23:50 Europe/Stockholm
+
+Implemented locally:
+
+- `scripts/cloud_chain_status.py` now supports optional `CLOUDFLARE_BACKUP_HEALTH_URL`.
+- If configured, the strict chain calls the deployed Worker `/health` endpoint and flags action required when the Worker is not ready.
+- If not configured, the strict chain reports `cloudflare_health=not configured` without failing the main chain.
+- Unit tests cover not configured, ready health, not-ready health, and action-required behavior for bad configured Cloudflare health.
+
+Local verification:
+
+- Workflow YAML parse passed for all `.github/workflows/*.yml`.
+- Backup Worker tests: `node --test cloudflare/swing-terminal-backup-worker/test/index.test.mjs` -> `8` tests passed.
+- Full Python suite: `python3 -m pytest -q` -> `258 passed in 6.15s`.
+- Secret scan: `python3 scripts/secret_scan.py` -> `secret_scan: ok (95 files)`.
+- Strict chain after the change exited `0` and reported `cloudflare_health=not configured`, which is expected until a Worker URL exists.
+
+Still not proven after this section:
+
+- A deployed Cloudflare `/health` response, because no Worker URL is configured yet.
+- A real Cloudflare Cron-triggered stale-run dispatch.
