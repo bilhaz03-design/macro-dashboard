@@ -27,6 +27,7 @@ from env_loader import load_default_env  # noqa: E402
 DEFAULT_EXPECTATIONS = [("etf", 50), ("stocks", 130)]
 WORKFLOWS = (
     "Swing Terminal Cloud Scanner",
+    "Swing Terminal Test Alert",
     "Swing Terminal Cloud Watchdog",
     "Swing Terminal CI",
     "Swing Terminal Safety",
