@@ -15,12 +15,16 @@ export default {
     ctx.waitUntil(runBackupClock(env));
   },
 
-  async fetch(request, env) {
+  async fetch(request, env, ctx = {}) {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
+      const envStatus = requiredEnvStatus(env);
       return jsonResponse(200, {
         ok: true,
         service: "swing-terminal-backup-clock",
+        ready: envStatus.ready,
+        missingRequiredEnv: envStatus.missing,
+        settings: readSettings(env),
         stockholm: stockholmParts(new Date()),
       });
     }
@@ -33,7 +37,7 @@ export default {
       const mode = url.searchParams.get("mode") || "etf";
       const noNotify = url.searchParams.get("no_notify") === "true";
       const result = await dispatchScanner(env, mode, {
-        fetchFn: fetch,
+        fetchFn: ctx.fetchFn || fetch,
         force: true,
         noNotify,
       });
@@ -120,6 +124,20 @@ function requiredEnv(env, name) {
     throw new Error(`missing_env:${name}`);
   }
   return value;
+}
+
+function requiredEnvStatus(env) {
+  const required = [
+    "SUPABASE_URL",
+    "SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_INGEST_TOKEN",
+    "GITHUB_ACTIONS_TOKEN",
+  ];
+  const missing = required.filter((name) => !env[name]);
+  return {
+    ready: missing.length === 0,
+    missing,
+  };
 }
 
 function supabaseHeaders(env) {

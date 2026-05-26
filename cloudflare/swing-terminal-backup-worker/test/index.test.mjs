@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runBackupClock } from "../src/index.js";
+import worker, { runBackupClock } from "../src/index.js";
 
 const BASE_ENV = {
   SUPABASE_URL: "https://example.supabase.co",
@@ -106,4 +106,63 @@ test("throttles duplicate backup dispatches", async () => {
 
   assert.deepEqual(result.actions.map((action) => action.action), ["throttled", "throttled"]);
   assert.equal(calls.filter((call) => call.url.includes("api.github.com")).length, 0);
+});
+
+test("health reports readiness without leaking secret values", async () => {
+  const response = await worker.fetch(new Request("https://backup.example/health"), {
+    ...BASE_ENV,
+    GITHUB_ACTIONS_TOKEN: "",
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.ready, false);
+  assert.deepEqual(payload.missingRequiredEnv, ["GITHUB_ACTIONS_TOKEN"]);
+  assert.equal(JSON.stringify(payload).includes(BASE_ENV.SUPABASE_INGEST_TOKEN), false);
+});
+
+test("health is ready when required env exists", async () => {
+  const response = await worker.fetch(new Request("https://backup.example/health"), BASE_ENV);
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ready, true);
+  assert.deepEqual(payload.missingRequiredEnv, []);
+  assert.equal(payload.settings.githubRepo, BASE_ENV.GITHUB_REPO);
+});
+
+test("manual run endpoint requires admin token", async () => {
+  const response = await worker.fetch(new Request("https://backup.example/run", { method: "POST" }), {
+    ...BASE_ENV,
+    ADMIN_TOKEN: "admin_test",
+  });
+
+  assert.equal(response.status, 403);
+});
+
+test("manual run endpoint dispatches forced scan when authorized", async () => {
+  const { fetchFn, calls } = makeFetch();
+  const request = new Request("https://backup.example/run?mode=stocks&no_notify=true", {
+    method: "POST",
+    headers: {
+      "x-swing-terminal-admin-token": "admin_test",
+    },
+  });
+  const response = await worker.fetch(request, {
+    ...BASE_ENV,
+    ADMIN_TOKEN: "admin_test",
+  }, {
+    fetchFn,
+  });
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.status, 204);
+  assert.equal(payload.mode, "stocks");
+  const githubCall = calls.find((call) => call.url.includes("api.github.com"));
+  assert.ok(githubCall);
+  assert.match(githubCall.init.body, /"mode":"stocks"/);
+  assert.match(githubCall.init.body, /"force":"true"/);
+  assert.match(githubCall.init.body, /"no_notify":"true"/);
 });

@@ -271,3 +271,26 @@ Still not proven after the post-cleanup run:
 
 - Telegram phone-level push/lock-screen delivery. The GitHub log proves Telegram API acceptance; only the user can confirm the phone UI.
 - Backup runner outside GitHub Actions. `cloud_chain_status.py --strict` still reports `cloudflare_backup=not deployed / no state yet` and missing Cloudflare deploy secrets.
+
+## Backup Worker readiness hardening — 2026-05-26 23:45 Europe/Stockholm
+
+Implemented locally before deploy credentials are available:
+
+- Cloudflare backup Worker `GET /health` now reports readiness, missing required env names, effective settings, and Stockholm clock parts without returning secret values.
+- Protected manual `POST /run` remains admin-token gated; the deploy workflow now supports optional `CF_ADMIN_TOKEN` -> Worker `ADMIN_TOKEN` secret.
+- Main CI now runs the backup Worker Node test suite on every push.
+- README now lists the GitHub repository secrets needed for the Cloudflare deployment path and documents `/health` and `/run`.
+
+Local verification:
+
+- Workflow YAML parse passed for all `.github/workflows/*.yml`.
+- Backup Worker tests: `node --test cloudflare/swing-terminal-backup-worker/test/index.test.mjs` -> `8` tests passed.
+- Focused Python tests: `python3 -m pytest tests/test_cloud_chain_status.py tests/test_run_scan_notify.py tests/test_secret_scan.py -q` -> `24 passed in 0.05s`.
+- Full Python suite: `python3 -m pytest -q` -> `253 passed in 7.15s`.
+- Secret scan: `python3 scripts/secret_scan.py` -> `secret_scan: ok (95 files)`.
+
+Still not proven after this section:
+
+- A real Cloudflare deploy, because `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are not configured locally/GitHub-side in the current evidence.
+- A deployed Worker `/health` HTTP response from Cloudflare.
+- A real Cloudflare Cron-triggered stale-run dispatch.

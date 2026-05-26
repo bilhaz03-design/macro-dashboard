@@ -59,11 +59,15 @@ jobs:
           printf '%s' "$CF_SUPABASE_PUBLISHABLE_KEY" | wrangler secret put SUPABASE_PUBLISHABLE_KEY --config cloudflare/swing-terminal-backup-worker/wrangler.toml
           printf '%s' "$CF_SUPABASE_INGEST_TOKEN" | wrangler secret put SUPABASE_INGEST_TOKEN --config cloudflare/swing-terminal-backup-worker/wrangler.toml
           printf '%s' "$CF_GITHUB_ACTIONS_TOKEN" | wrangler secret put GITHUB_ACTIONS_TOKEN --config cloudflare/swing-terminal-backup-worker/wrangler.toml
+          if [ -n "$CF_ADMIN_TOKEN" ]; then
+            printf '%s' "$CF_ADMIN_TOKEN" | wrangler secret put ADMIN_TOKEN --config cloudflare/swing-terminal-backup-worker/wrangler.toml
+          fi
         env:
           CF_SUPABASE_URL: ${{ secrets.CF_SUPABASE_URL }}
           CF_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.CF_SUPABASE_PUBLISHABLE_KEY }}
           CF_SUPABASE_INGEST_TOKEN: ${{ secrets.CF_SUPABASE_INGEST_TOKEN }}
           CF_GITHUB_ACTIONS_TOKEN: ${{ secrets.CF_GITHUB_ACTIONS_TOKEN }}
+          CF_ADMIN_TOKEN: ${{ secrets.CF_ADMIN_TOKEN }}
 
       - name: Deploy Worker
         run: wrangler deploy --config cloudflare/swing-terminal-backup-worker/wrangler.toml
