@@ -3,11 +3,6 @@ name: Swing Terminal Cloud Watchdog
 on:
   schedule:
     - cron: "28,58 7-21 * * 1-5"
-  workflow_run:
-    workflows:
-      - Swing Terminal Cloud Scanner
-    types:
-      - completed
   workflow_dispatch:
     inputs:
       force:
@@ -46,6 +41,7 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Check out repository
+        id: checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -73,7 +69,7 @@ jobs:
           python scripts/cloud_watchdog.py "${args[@]}"
 
       - name: Notify Telegram on watchdog workflow failure
-        if: ${{ failure() && github.event.inputs.no_notify != 'true' }}
+        if: ${{ failure() && steps.checkout.outcome == 'success' && github.event.inputs.no_notify != 'true' }}
         shell: bash
         run: |
           python scripts/github_failure_notify.py \
