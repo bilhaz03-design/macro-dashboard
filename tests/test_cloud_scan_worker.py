@@ -145,6 +145,15 @@ def test_should_use_cached_mlpb_events_when_fresh(tmp_path, monkeypatch):
     assert "fresh" in reason
 
 
+def test_run_mlpb_stock_gate_skips_when_optional_scripts_missing(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cloud_scan_worker, "MLPB_RESEARCH_SCRIPT", tmp_path / "missing_research.py")
+    monkeypatch.setattr(cloud_scan_worker, "MLPB_GATE_SCRIPT", tmp_path / "missing_gate.py")
+    monkeypatch.setattr(cloud_scan_worker, "run", lambda cmd: (_ for _ in ()).throw(AssertionError("run should not be called")))
+
+    assert cloud_scan_worker.run_mlpb_stock_gate() == 0
+    assert "optional MLPB gate skipped" in capsys.readouterr().out
+
+
 def test_fresh_scan_skip_reason_skips_recent_ok_mode(monkeypatch):
     config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
 

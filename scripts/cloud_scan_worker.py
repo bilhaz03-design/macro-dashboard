@@ -92,6 +92,8 @@ ETF_SIGNALS_PATH = DATA_DIR / "latest-signals.json"
 ETF_COVERAGE_FAIL_EXIT_CODE = 5
 MLPB_EVENTS_PATH = DATA_DIR / "mlpb_final_falsification_events.json"
 MLPB_GATE_PATH = DATA_DIR / "mlpb_current_trade_gate.json"
+MLPB_RESEARCH_SCRIPT = ROOT / "scripts" / "mlpb_final_falsification_research.py"
+MLPB_GATE_SCRIPT = ROOT / "scripts" / "mlpb_current_trade_gate.py"
 MLPB_REFRESH_HOURS_ENV = "SWING_TERMINAL_MLPB_REFRESH_HOURS"
 MLPB_DEFAULT_REFRESH_HOURS = 18
 
@@ -375,16 +377,32 @@ def should_refresh_mlpb_events(
 
 
 def run_mlpb_stock_gate() -> int:
+    if not MLPB_RESEARCH_SCRIPT.exists() or not MLPB_GATE_SCRIPT.exists():
+        missing = []
+        for path in (MLPB_RESEARCH_SCRIPT, MLPB_GATE_SCRIPT):
+            if path.exists():
+                continue
+            try:
+                missing.append(str(path.relative_to(ROOT)))
+            except ValueError:
+                missing.append(str(path))
+        print(
+            "[cloud_scan_worker] optional MLPB gate skipped: missing scripts "
+            f"{', '.join(missing)}",
+            flush=True,
+        )
+        return 0
+
     exit_code = 0
     refresh, reason = should_refresh_mlpb_events()
     if refresh:
         print(f"[cloud_scan_worker] refreshing MLPB final events: {reason}", flush=True)
-        exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "mlpb_final_falsification_research.py")]))
+        exit_code = max(exit_code, run([sys.executable, str(MLPB_RESEARCH_SCRIPT)]))
     else:
         print(f"[cloud_scan_worker] using cached MLPB final events: {reason}", flush=True)
 
     if MLPB_EVENTS_PATH.exists():
-        exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "mlpb_current_trade_gate.py")]))
+        exit_code = max(exit_code, run([sys.executable, str(MLPB_GATE_SCRIPT)]))
     else:
         print("[cloud_scan_worker] MLPB gate skipped: missing final event set", file=sys.stderr, flush=True)
         exit_code = max(exit_code, 1)
@@ -698,7 +716,6 @@ def main() -> int:
             DATA_DIR / "stock_framework_robustness_summary.json",
             DATA_DIR / "stock_framework_walkforward_summary.json",
             DATA_DIR / "stock_framework_deep_current_signals.json",
-            MLPB_GATE_PATH,
         ]
         if all(path.exists() for path in stock_inputs):
             exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "export_stock_terminal_data.py")]))
