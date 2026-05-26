@@ -72,6 +72,8 @@ def push_telegram(title: str, subtitle: str, msg: str) -> bool:
 
 def push(title: str, subtitle: str, msg: str, sound: str = "default") -> bool:
     telegram_sent = push_telegram(title, subtitle, msg)
+    if os.environ.get("SWING_TERMINAL_CLOUD_RUN") == "1":
+        return telegram_sent
     notifier = shutil.which("terminal-notifier")
     if notifier:
         try:

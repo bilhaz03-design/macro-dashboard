@@ -224,3 +224,34 @@ Still not proven after this final update:
 
 - Managed container/VM provider runtime outside GitHub Actions.
 - Scanner-generated Telegram message from a real new signal; Telegram transport works, but no new live scanner signal was produced in the proof run.
+
+## Separate test-alert workflow and cloud-notifier cleanup — 2026-05-26 23:22–23:35 Europe/Stockholm
+
+Verified before this cleanup:
+
+- `Swing Terminal Test Alert` run `26475907854` completed successfully on branch `main`.
+- The run executed `python scripts/cloud_scan_worker.py --mode test-alert --force`.
+- The run executed `scripts/run_scan_notify.py --test-signal-alert --test-signal-alert-source 20260526T232231-26475907854`.
+- GitHub log contained `[run_scan_notify.py] telegram sent: sendMessage`.
+- GitHub log contained `[cloud_scan_worker] recorded test-alert run without replacing scanner artifacts`.
+- Strict chain status after that run exited `0` and kept the real Cloud Scanner status tied to the real scanner workflow, not the test-alert workflow.
+
+Gap found during that proof:
+
+- The GitHub Ubuntu runner still attempted the local macOS notifier fallback after Telegram send, producing a noisy `terminal-notifier` Linux syntax warning even though the Telegram send succeeded and the workflow exited `0`.
+
+Cleanup implemented locally:
+
+- `scripts/run_scan_notify.py` now returns immediately after Telegram when `SWING_TERMINAL_CLOUD_RUN=1`, so cloud runs do not probe `terminal-notifier` or `osascript` fallbacks.
+- `tests/test_run_scan_notify.py::test_push_skips_local_notifier_in_cloud` proves the cloud path returns after Telegram and fails the test if local notifier probing occurs.
+
+Local verification after this cleanup:
+
+- Focused notification tests: `python3 -m pytest tests/test_run_scan_notify.py -q` -> `11 passed in 0.04s`.
+- Full local test suite: `python3 -m pytest -q` -> `253 passed in 6.42s`.
+- Secret scan: `python3 scripts/secret_scan.py` -> `secret_scan: ok (95 files)`.
+
+Still not proven in this section until a post-cleanup GitHub run is observed:
+
+- That the next GitHub `Swing Terminal Test Alert` log is free from the Linux `terminal-notifier` warning.
+- That the Telegram message appears as a push notification on the user's phone screen; GitHub can only prove Telegram API acceptance unless the user confirms phone receipt.

@@ -166,6 +166,23 @@ def test_notify_test_signal_alert_dry_run_uses_temp_state(capsys):
     assert "TEST ALERT — no trade" in out
 
 
+def test_push_skips_local_notifier_in_cloud(monkeypatch):
+    monkeypatch.setenv("SWING_TERMINAL_CLOUD_RUN", "1")
+    monkeypatch.setattr(run_scan_notify, "push_telegram", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        run_scan_notify.shutil,
+        "which",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("local notifier was probed")),
+    )
+    monkeypatch.setattr(
+        run_scan_notify.Path,
+        "exists",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("osascript fallback was probed")),
+    )
+
+    assert run_scan_notify.push("Trading Scanner", "Cloud", "test") is True
+
+
 def test_wait_signal_stock_thesis_notification_uses_lifecycle(monkeypatch, tmp_path):
     latest_path = tmp_path / "latest-signals.json"
     latest_path.write_text(json.dumps({
