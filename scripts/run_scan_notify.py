@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,7 @@ NOTIFY_STATE = ROOT / "data" / "signal-notify-state.json"
 STOCK_JOURNAL_PATH = ROOT / "data" / "stock-signal-journal.json"
 _DEFAULT_DASHBOARD_URL = "" if os.environ.get("SWING_TERMINAL_CLOUD_RUN") == "1" else "http://127.0.0.1:8000/terminal.html"
 DASHBOARD_URL = os.environ.get("SWING_TERMINAL_DASHBOARD_URL", _DEFAULT_DASHBOARD_URL)
+ALERT_DATE_RE = re.compile(r"daily-scan-(\d{4}-\d{2}-\d{2})|^\[(\d{4}-\d{2}-\d{2})T")
 
 
 def push_telegram(title: str, subtitle: str, msg: str) -> None:
@@ -118,6 +120,101 @@ def save_notify_state(sent_events: set[str]) -> None:
     NOTIFY_STATE.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def usable_secret(value: str | None) -> bool:
+    return bool(value and not value.startswith("PASTE_") and not value.endswith("_HERE"))
+
+
+def notification_health(env: dict[str, str] | None = None) -> dict:
+    env = env or os.environ
+    token_ok = usable_secret(env.get("TELEGRAM_BOT_TOKEN"))
+    chat_ok = usable_secret(env.get("TELEGRAM_CHAT_ID"))
+    telegram_ready = token_ok and chat_ok
+    local_ready = bool(shutil.which("terminal-notifier") or Path("/usr/bin/osascript").exists())
+    return {
+        "telegram_token": token_ok,
+        "telegram_chat": chat_ok,
+        "telegram_ready": telegram_ready,
+        "local_fallback_ready": local_ready,
+        "cloud_ready": telegram_ready,
+        "dashboard_url": bool(DASHBOARD_URL),
+        "channel": "telegram" if telegram_ready else "local" if local_ready else "log",
+    }
+
+
+def alert_scan_date(alert_line: str) -> str | None:
+    match = ALERT_DATE_RE.search(alert_line or "")
+    if not match:
+        return None
+    return match.group(1) or match.group(2)
+
+
+def latest_json_date() -> str | None:
+    if not JSON_PATH.exists():
+        return None
+    try:
+        payload = json.loads(JSON_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    date_text = payload.get("date")
+    return str(date_text)[:10] if date_text else None
+
+
+def alert_is_obsolete(alert_line: str) -> bool:
+    alert_date = alert_scan_date(alert_line)
+    latest_date = latest_json_date()
+    return bool(alert_date and latest_date and alert_date < latest_date)
+
+
+def classify_alert(alert_line: str) -> tuple[str, str, str, str]:
+    """Return title, subtitle, message, sound for scanner alert file lines."""
+    msg = alert_line or "SCAN_ALERT.txt exists"
+    if "FETCH_FAILURE" in msg:
+        return "Scanner FAILED", "Fetch failure", msg, "Basso"
+    if "DATA_INTEGRITY" in msg:
+        return "Scanner degraded", "Data integrity warning", msg, "default"
+    return "Scanner alert", "Data integrity / fetch alert", msg, "Basso"
+
+
+def stock_thesis_probability(item: dict) -> int:
+    try:
+        return int((item.get("thesis") or {}).get("subjective_probability") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def stock_lifecycle_state(item: dict) -> str:
+    return str((item.get("lifecycle") or {}).get("state") or item.get("lifecycle_state") or "ACTIVE")
+
+
+def stock_notify_kind(item: dict) -> str | None:
+    action = item.get("action")
+    lifecycle = stock_lifecycle_state(item)
+    probability = stock_thesis_probability(item)
+    if action in {"TRADE", "LIVE_REVIEW"}:
+        return "stock_active"
+    if action in {"WAIT_95_SIGNAL", "WAIT_SIGNAL"} and lifecycle in {"NEW", "RETURNED", "UPGRADED"} and probability >= 58:
+        return "stock_thesis"
+    if action in {"WAIT_95_SIGNAL", "WAIT_SIGNAL", "PAPER_TRACK"} and lifecycle == "DOWNGRADED" and probability >= 58:
+        return "stock_thesis_down"
+    return None
+
+
+def stock_notification_title(item: dict, kind: str) -> str:
+    action = item.get("action")
+    lifecycle = stock_lifecycle_state(item)
+    if action == "LIVE_REVIEW":
+        return "New stock review signal"
+    if action == "TRADE":
+        return "New stock trade signal"
+    if kind == "stock_thesis_down":
+        return "Stock thesis weakening"
+    if lifecycle == "UPGRADED":
+        return "Stock thesis improving"
+    if lifecycle == "RETURNED":
+        return "Stock thesis returned"
+    return "New stock thesis"
+
+
 def notify_stock_journal(sent_events: set[str]) -> bool:
     if not STOCK_JOURNAL_PATH.exists():
         return False
@@ -129,18 +226,51 @@ def notify_stock_journal(sent_events: set[str]) -> bool:
     wrote_state = False
     signals = payload.get("signals", []) if isinstance(payload, dict) else []
     for item in signals:
-        if item.get("action") not in {"TRADE", "LIVE_REVIEW"}:
+        kind = stock_notify_kind(item)
+        if kind is None:
             continue
+        is_review = item.get("action") == "LIVE_REVIEW"
         key = item.get("key")
-        active_id = f"{key}|stock_active|{item.get('first_seen_at')}"
-        faded_id = f"{key}|stock_faded|{item.get('last_seen_at')}"
+        active_id = (
+            f"{key}|stock_active|{item.get('first_seen_at')}"
+            if kind == "stock_active"
+            else f"{key}|{kind}|{item.get('first_seen_at')}|{stock_lifecycle_state(item)}"
+        )
+        faded_id = f"{key}|{kind}_faded|{item.get('last_seen_at')}"
         if item.get("active"):
             if active_id in sent_events:
                 continue
+            thesis = item.get("thesis") or {}
+            lifecycle = item.get("lifecycle") or {}
+            message_parts = [
+                f"{item.get('signal')}",
+                f"Action: {'Review - manual checks required' if is_review else 'Trade candidate' if item.get('action') == 'TRADE' else item.get('action')}",
+                f"Thesis: {thesis.get('stance', 'open read')} ({stock_thesis_probability(item)}%)",
+                f"Lifecycle: {lifecycle.get('label') or stock_lifecycle_state(item)}",
+                f"Entry: {item.get('entry')}",
+                f"Quality: {item.get('quality_score')}",
+                f"Tier: {item.get('tier')}",
+            ]
+            wait_for = thesis.get("wait_for") if isinstance(thesis.get("wait_for"), list) else []
+            buy_if = thesis.get("buy_if") if isinstance(thesis.get("buy_if"), list) else []
+            if wait_for:
+                message_parts.append(f"Wait: {wait_for[0]}")
+            if buy_if:
+                message_parts.append(f"Buy if: {buy_if[0]}")
+            if item.get("current_gate"):
+                message_parts.append(f"Gate: {item.get('current_gate')}")
+            if item.get("prime_tier"):
+                message_parts.append(f"Prime: {item.get('prime_tier')}")
+            qt_parts = [item.get("qt_label"), item.get("qt_phase"), item.get("qt_wait_label"), item.get("qt_confirmation")]
+            qt_text = " / ".join(str(part) for part in qt_parts if part)
+            if qt_text:
+                message_parts.append(f"QT: {qt_text}")
+            if item.get("earnings_date"):
+                message_parts.append(f"Earnings: {item.get('earnings_date')}")
             push(
-                "New stock trade signal",
+                stock_notification_title(item, kind),
                 f"{item.get('ticker')} — {item.get('name')}",
-                f"{item.get('signal')} | Entry: {item.get('entry')} | Quality: {item.get('quality_score')} | Tier: {item.get('tier')}",
+                " | ".join(message_parts),
                 "Ping",
             )
             sent_events.add(active_id)
@@ -164,8 +294,16 @@ def event_id(event: dict, status: str) -> str:
 def notify_from_latest() -> int:
     if ALERT.exists():
         last_line = ALERT.read_text(encoding="utf-8", errors="replace").splitlines()[-1:]
-        push("Scanner FAILED", "Data integrity / fetch alert", last_line[0] if last_line else "SCAN_ALERT.txt exists", "Basso")
-        return 0
+        alert_line = last_line[0] if last_line else "SCAN_ALERT.txt exists"
+        if alert_is_obsolete(alert_line):
+            try:
+                ALERT.unlink()
+            except OSError:
+                pass
+        else:
+            title, subtitle, message, sound = classify_alert(alert_line)
+            push(title, subtitle, message, sound)
+            return 0
 
     if not JSON_PATH.exists():
         push("Trading Scanner", "Saknar data", "latest-signals.json saknas.", "Basso")

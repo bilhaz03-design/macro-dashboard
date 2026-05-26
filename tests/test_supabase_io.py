@@ -1,4 +1,5 @@
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -93,3 +94,35 @@ def test_text_artifact_roundtrip_helpers(monkeypatch, tmp_path):
     assert uploaded["payload"]["text"] == "window.SCAN_DATA = {};\n"
     assert supabase_io.restore_text_artifact(config, "scan-data-js", out) is True
     assert out.read_text() == "window.SCAN_DATA = {};\n"
+
+
+def test_request_json_sanitizes_nonfinite_numbers(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"[]"
+
+    def fake_urlopen(req, timeout=30):
+        captured["body"] = req.data.decode("utf-8")
+        return FakeResponse()
+
+    monkeypatch.setattr(supabase_io.urllib.request, "urlopen", fake_urlopen)
+    config = supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+
+    supabase_io.request_json(
+        config,
+        "POST",
+        "scanner_artifacts",
+        body={"payload": {"qt_z": math.nan, "ok": 1.0, "bad": math.inf}},
+    )
+
+    assert json.loads(captured["body"]) == {"payload": {"qt_z": None, "ok": 1.0, "bad": None}}
+    assert "NaN" not in captured["body"]
+    assert "Infinity" not in captured["body"]

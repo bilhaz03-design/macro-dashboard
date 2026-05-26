@@ -40,6 +40,8 @@ RESTORED_ARTIFACTS = {
     "signal-notify-state": DATA_DIR / "signal-notify-state.json",
     "live-trades": DATA_DIR / "live-trades.json",
     "execution-map": DATA_DIR / "execution_map.json",
+    "mlpb-final-events": DATA_DIR / "mlpb_final_falsification_events.json",
+    "mlpb-current-gate": DATA_DIR / "mlpb_current_trade_gate.json",
 }
 
 PUBLISHED_JSON_ARTIFACTS = {
@@ -50,11 +52,33 @@ PUBLISHED_JSON_ARTIFACTS = {
     "live-trades": ("live_trades", DATA_DIR / "live-trades.json"),
     "execution-map": ("execution_map", DATA_DIR / "execution_map.json"),
     "stock-current-coverage": ("stock_current_coverage", DATA_DIR / "stock_framework_current_scan_coverage.json"),
+    "mlpb-final-events": ("mlpb_final_events", DATA_DIR / "mlpb_final_falsification_events.json"),
+    "mlpb-current-gate": ("mlpb_current_gate", DATA_DIR / "mlpb_current_trade_gate.json"),
 }
 
 PUBLISHED_TEXT_ARTIFACTS = {
     "scan-data-js": ("scan_data_js", ROOT / "dashboard" / "scan_data.js"),
     "stock-data-js": ("stock_data_js", ROOT / "dashboard" / "stock_data.js"),
+}
+
+ETF_PUBLISH_KEYS = {
+    "latest-signals",
+    "signal-journal",
+    "signal-notify-state",
+    "live-trades",
+    "execution-map",
+    "scan-data-js",
+}
+
+STOCK_PUBLISH_KEYS = {
+    "stock-signal-journal",
+    "signal-notify-state",
+    "live-trades",
+    "execution-map",
+    "stock-current-coverage",
+    "mlpb-final-events",
+    "mlpb-current-gate",
+    "stock-data-js",
 }
 
 FRESH_SCAN_DEDUPE_WINDOWS = {
@@ -66,6 +90,10 @@ STOCK_COVERAGE_PATH = DATA_DIR / "stock_framework_current_scan_coverage.json"
 STOCK_COVERAGE_FAIL_EXIT_CODE = 4
 ETF_SIGNALS_PATH = DATA_DIR / "latest-signals.json"
 ETF_COVERAGE_FAIL_EXIT_CODE = 5
+MLPB_EVENTS_PATH = DATA_DIR / "mlpb_final_falsification_events.json"
+MLPB_GATE_PATH = DATA_DIR / "mlpb_current_trade_gate.json"
+MLPB_REFRESH_HOURS_ENV = "SWING_TERMINAL_MLPB_REFRESH_HOURS"
+MLPB_DEFAULT_REFRESH_HOURS = 18
 
 
 def now_stockholm() -> datetime:
@@ -308,6 +336,61 @@ def run(cmd: list[str]) -> int:
     return int(proc.returncode)
 
 
+def file_age_hours(path: Path, *, now_utc: datetime | None = None) -> float | None:
+    if not path.exists():
+        return None
+    now_utc = now_utc or datetime.now(timezone.utc)
+    modified_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return max(0.0, (now_utc - modified_at).total_seconds() / 3600)
+
+
+def mlpb_events_schema_issue(path: Path) -> str | None:
+    payload = load_json(path, {})
+    events = payload.get("events") if isinstance(payload, dict) else None
+    if not isinstance(events, list) or not events:
+        return "MLPB event set has no events"
+    sample = next((item for item in events if isinstance(item, dict)), {})
+    required = ("visual_grade", "qt_label", "qt_phase", "qt_wait_label")
+    missing = [field for field in required if field not in sample]
+    if missing:
+        return f"MLPB event set missing Prime fields: {', '.join(missing)}"
+    return None
+
+
+def should_refresh_mlpb_events(
+    path: Path = MLPB_EVENTS_PATH,
+    *,
+    now_utc: datetime | None = None,
+) -> tuple[bool, str]:
+    refresh_hours = parse_positive_int_env(MLPB_REFRESH_HOURS_ENV, MLPB_DEFAULT_REFRESH_HOURS)
+    age_hours = file_age_hours(path, now_utc=now_utc)
+    if age_hours is None:
+        return True, "MLPB event set missing"
+    schema_issue = mlpb_events_schema_issue(path)
+    if schema_issue:
+        return True, schema_issue
+    if age_hours >= refresh_hours:
+        return True, f"MLPB event set stale ({age_hours:.1f}h >= {refresh_hours}h)"
+    return False, f"MLPB event set fresh ({age_hours:.1f}h < {refresh_hours}h)"
+
+
+def run_mlpb_stock_gate() -> int:
+    exit_code = 0
+    refresh, reason = should_refresh_mlpb_events()
+    if refresh:
+        print(f"[cloud_scan_worker] refreshing MLPB final events: {reason}", flush=True)
+        exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "mlpb_final_falsification_research.py")]))
+    else:
+        print(f"[cloud_scan_worker] using cached MLPB final events: {reason}", flush=True)
+
+    if MLPB_EVENTS_PATH.exists():
+        exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "mlpb_current_trade_gate.py")]))
+    else:
+        print("[cloud_scan_worker] MLPB gate skipped: missing final event set", file=sys.stderr, flush=True)
+        exit_code = max(exit_code, 1)
+    return exit_code
+
+
 def restore_state(config: supabase_io.SupabaseConfig) -> list[str]:
     restored: list[str] = []
     for artifact_key, path in RESTORED_ARTIFACTS.items():
@@ -404,6 +487,8 @@ def artifact_scan_date(artifact_key: str, path: Path, fallback: str | None) -> s
         return journal_scan_date(payload) or fallback
     if artifact_key == "stock-current-coverage" and isinstance(payload, dict):
         return iso_date_or_none(payload.get("generated_at")) or fallback
+    if artifact_key in {"mlpb-final-events", "mlpb-current-gate"} and isinstance(payload, dict):
+        return iso_date_or_none(payload.get("generated_at")) or fallback
     return fallback
 
 
@@ -481,9 +566,20 @@ def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
     }
 
 
+def publish_keys_for_mode(mode: str | None) -> set[str]:
+    if mode == "etf":
+        return set(ETF_PUBLISH_KEYS)
+    if mode == "stocks":
+        return set(STOCK_PUBLISH_KEYS)
+    return set(PUBLISHED_JSON_ARTIFACTS) | set(PUBLISHED_TEXT_ARTIFACTS)
+
+
 def publish_state(config: supabase_io.SupabaseConfig, run_summary: dict) -> None:
     scan_date = run_summary.get("scan_date")
+    publish_keys = publish_keys_for_mode(str(run_summary.get("mode") or "all"))
     for artifact_key, (kind, path) in PUBLISHED_JSON_ARTIFACTS.items():
+        if artifact_key not in publish_keys:
+            continue
         if path.exists():
             supabase_io.upload_json_file(
                 config,
@@ -493,6 +589,8 @@ def publish_state(config: supabase_io.SupabaseConfig, run_summary: dict) -> None
                 scan_date=artifact_scan_date(artifact_key, path, scan_date),
             )
     for artifact_key, (kind, path) in PUBLISHED_TEXT_ARTIFACTS.items():
+        if artifact_key not in publish_keys:
+            continue
         if path.exists():
             supabase_io.upload_text_file(
                 config,
@@ -595,10 +693,12 @@ def main() -> int:
     if args.mode in {"all", "stocks"} and not args.daily_dry_run:
         exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "stock_current_scan.py")]))
         exit_code = max(exit_code, validate_stock_coverage())
+        exit_code = max(exit_code, run_mlpb_stock_gate())
         stock_inputs = [
             DATA_DIR / "stock_framework_robustness_summary.json",
             DATA_DIR / "stock_framework_walkforward_summary.json",
             DATA_DIR / "stock_framework_deep_current_signals.json",
+            MLPB_GATE_PATH,
         ]
         if all(path.exists() for path in stock_inputs):
             exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "export_stock_terminal_data.py")]))

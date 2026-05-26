@@ -1,3 +1,4 @@
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -79,10 +80,69 @@ def test_artifact_scan_date_uses_payload_date(tmp_path):
     stock_path.write_text('{"scan_date": "2026-05-21", "signals": []}')
     coverage_path = tmp_path / "coverage.json"
     coverage_path.write_text('{"generated_at": "2026-05-22T08:05:00", "ok": 108}')
+    mlpb_path = tmp_path / "mlpb-current-gate.json"
+    mlpb_path.write_text('{"generated_at": "2026-05-24T23:25:41", "candidates": []}')
 
     assert cloud_scan_worker.artifact_scan_date("latest-signals", latest_path, "2026-05-23") == "2026-05-20"
     assert cloud_scan_worker.artifact_scan_date("stock-signal-journal", stock_path, "2026-05-23") == "2026-05-21"
     assert cloud_scan_worker.artifact_scan_date("stock-current-coverage", coverage_path, "2026-05-23") == "2026-05-22"
+    assert cloud_scan_worker.artifact_scan_date("mlpb-current-gate", mlpb_path, "2026-05-23") == "2026-05-24"
+
+
+def test_should_refresh_mlpb_events_for_missing_and_stale_files(tmp_path, monkeypatch):
+    monkeypatch.delenv("SWING_TERMINAL_MLPB_REFRESH_HOURS", raising=False)
+    missing_path = tmp_path / "missing.json"
+
+    refresh, reason = cloud_scan_worker.should_refresh_mlpb_events(
+        missing_path,
+        now_utc=datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc),
+    )
+    assert refresh is True
+    assert "missing" in reason
+
+    stale_path = tmp_path / "events.json"
+    stale_path.write_text('{"events": [{"visual_grade": "CLEAN", "qt_label": "QT_SUPPORT", "qt_phase": "REPAIRING", "qt_wait_label": "LOW_WAIT_VALUE"}]}', encoding="utf-8")
+    old_ts = datetime(2026, 5, 24, 10, 0, tzinfo=timezone.utc).timestamp()
+    os.utime(stale_path, (old_ts, old_ts))
+
+    refresh, reason = cloud_scan_worker.should_refresh_mlpb_events(
+        stale_path,
+        now_utc=datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc),
+    )
+    assert refresh is True
+    assert "stale" in reason
+
+
+def test_should_refresh_mlpb_events_for_stale_schema(tmp_path, monkeypatch):
+    monkeypatch.setenv("SWING_TERMINAL_MLPB_REFRESH_HOURS", "18")
+    path = tmp_path / "events.json"
+    path.write_text('{"events": [{"ticker": "KEYS"}]}', encoding="utf-8")
+    modified_ts = datetime(2026, 5, 25, 0, 0, tzinfo=timezone.utc).timestamp()
+    os.utime(path, (modified_ts, modified_ts))
+
+    refresh, reason = cloud_scan_worker.should_refresh_mlpb_events(
+        path,
+        now_utc=datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert refresh is True
+    assert "missing Prime fields" in reason
+
+
+def test_should_use_cached_mlpb_events_when_fresh(tmp_path, monkeypatch):
+    monkeypatch.setenv("SWING_TERMINAL_MLPB_REFRESH_HOURS", "18")
+    path = tmp_path / "events.json"
+    path.write_text('{"events": [{"visual_grade": "CLEAN", "qt_label": "QT_SUPPORT", "qt_phase": "REPAIRING", "qt_wait_label": "LOW_WAIT_VALUE"}]}', encoding="utf-8")
+    modified_ts = datetime(2026, 5, 25, 0, 0, tzinfo=timezone.utc).timestamp()
+    os.utime(path, (modified_ts, modified_ts))
+
+    refresh, reason = cloud_scan_worker.should_refresh_mlpb_events(
+        path,
+        now_utc=datetime(2026, 5, 25, 10, 0, tzinfo=timezone.utc),
+    )
+
+    assert refresh is False
+    assert "fresh" in reason
 
 
 def test_fresh_scan_skip_reason_skips_recent_ok_mode(monkeypatch):
@@ -349,6 +409,17 @@ def test_publish_cloud_result_keeps_artifacts_on_failure(monkeypatch):
 
     assert calls == ["summary"]
     assert "without replacing scanner artifacts" in message
+
+
+def test_publish_keys_are_mode_specific():
+    assert "latest-signals" in cloud_scan_worker.publish_keys_for_mode("etf")
+    assert "scan-data-js" in cloud_scan_worker.publish_keys_for_mode("etf")
+    assert "stock-current-coverage" not in cloud_scan_worker.publish_keys_for_mode("etf")
+    assert "mlpb-final-events" not in cloud_scan_worker.publish_keys_for_mode("etf")
+
+    assert "stock-current-coverage" in cloud_scan_worker.publish_keys_for_mode("stocks")
+    assert "stock-data-js" in cloud_scan_worker.publish_keys_for_mode("stocks")
+    assert "latest-signals" not in cloud_scan_worker.publish_keys_for_mode("stocks")
 
 
 def test_publish_cloud_result_publishes_artifacts_on_success(monkeypatch):

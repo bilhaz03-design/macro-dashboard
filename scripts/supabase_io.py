@@ -9,6 +9,7 @@ safer publishable-key + ingest-token path.
 from __future__ import annotations
 
 import json
+import math
 import os
 import urllib.error
 import urllib.parse
@@ -79,6 +80,24 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"{type(value).__name__} is not JSON serializable")
 
 
+def sanitize_json_value(value: Any) -> Any:
+    """Return a strict-JSON-safe copy.
+
+    Python's json.dumps emits NaN/Infinity by default, but PostgREST rejects
+    those as invalid JSON. Scanner research artifacts can legitimately contain
+    non-finite intermediate values, so convert them to null before upload.
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(k): sanitize_json_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [sanitize_json_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_json_value(item) for item in value]
+    return value
+
+
 def request_json(
     config: SupabaseConfig,
     method: str,
@@ -101,7 +120,8 @@ def request_json(
     if config.ingest_token:
         headers["x-swing-terminal-token"] = config.ingest_token
     if body is not None:
-        data = json.dumps(body, ensure_ascii=False, default=_json_default).encode("utf-8")
+        safe_body = sanitize_json_value(body)
+        data = json.dumps(safe_body, ensure_ascii=False, default=_json_default, allow_nan=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
     if prefer:
         headers["Prefer"] = prefer

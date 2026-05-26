@@ -453,14 +453,113 @@ def _overlay_intraday(ticker: str, df: pd.DataFrame) -> tuple[pd.DataFrame, dict
         return df, meta
 
 
-def _is_stale_close(last_close: date, runtime_date: date) -> bool:
-    """Conservative stale-data guard.
+def _easter_sunday(year: int) -> date:
+    """Gregorian Easter Sunday, used for Good Friday market holiday."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
 
-    Friday data scanned on Monday is acceptable (3 calendar days). Older data
-    is treated as stale and excluded from signal evaluation.
+
+def _observed_fixed_holiday(year: int, month: int, day: int) -> date:
+    actual = date(year, month, day)
+    if actual.weekday() == 5:  # Saturday observed Friday
+        return actual - timedelta(days=1)
+    if actual.weekday() == 6:  # Sunday observed Monday
+        return actual + timedelta(days=1)
+    return actual
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    day = date(year, month, 1)
+    offset = (weekday - day.weekday()) % 7
+    return day + timedelta(days=offset + 7 * (n - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    if month == 12:
+        day = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        day = date(year, month + 1, 1) - timedelta(days=1)
+    return day - timedelta(days=(day.weekday() - weekday) % 7)
+
+
+def _us_market_holidays(year: int) -> set[date]:
+    """NYSE full-day holidays needed for stale-close checks.
+
+    Early closes are intentionally ignored; the stale guard only needs to know
+    whether a normal daily close should have existed between two dates.
     """
-    age_days = (runtime_date - last_close).days
-    return age_days > 3
+    holidays = {
+        _observed_fixed_holiday(year, 1, 1),       # New Year's Day
+        _nth_weekday(year, 1, 0, 3),               # Martin Luther King Jr. Day
+        _nth_weekday(year, 2, 0, 3),               # Washington's Birthday
+        _easter_sunday(year) - timedelta(days=2),  # Good Friday
+        _last_weekday(year, 5, 0),                 # Memorial Day
+        _observed_fixed_holiday(year, 6, 19),      # Juneteenth
+        _observed_fixed_holiday(year, 7, 4),       # Independence Day
+        _nth_weekday(year, 9, 0, 1),               # Labor Day
+        _nth_weekday(year, 11, 3, 4),              # Thanksgiving Day
+        _observed_fixed_holiday(year, 12, 25),     # Christmas Day
+    }
+    # If next New Year's Day is observed on Dec 31 this year.
+    next_new_year_observed = _observed_fixed_holiday(year + 1, 1, 1)
+    if next_new_year_observed.year == year:
+        holidays.add(next_new_year_observed)
+    return holidays
+
+
+def _uses_us_market_calendar(ticker: str | None = None) -> bool:
+    t = (ticker or "").upper()
+    if not t:
+        return False
+    if t in {"^GSPC", "^DJI", "^IXIC", "^RUT", "^VIX"}:
+        return True
+    return "." not in t and not t.startswith("^")
+
+
+def _expected_trading_day(day: date, ticker: str | None = None) -> bool:
+    if day.weekday() >= 5:
+        return False
+    if _uses_us_market_calendar(ticker) and day in _us_market_holidays(day.year):
+        return False
+    return True
+
+
+def _expected_trading_days_after(last_close: date, runtime_date: date, ticker: str | None = None) -> int:
+    if runtime_date <= last_close:
+        return 0
+    count = 0
+    day = last_close + timedelta(days=1)
+    while day <= runtime_date:
+        if _expected_trading_day(day, ticker):
+            count += 1
+        day += timedelta(days=1)
+    return count
+
+
+def _is_stale_close(last_close: date, runtime_date: date, ticker: str | None = None) -> bool:
+    """Conservative trading-calendar-aware stale-data guard.
+
+    The current runtime date is allowed as one pending trading session because
+    scans can run before the official daily close exists in Yahoo/yfinance.
+    Data is stale only when more than one expected trading session has passed
+    after the latest close. US-listed tickers use a NYSE full-day holiday
+    calendar; other tickers use weekday-only fallback unless a better calendar
+    is added.
+    """
+    return _expected_trading_days_after(last_close, runtime_date, ticker) > 1
 
 
 def _recent_split_event(ticker: str, runtime_date: date, lookback_days: int = 90) -> Optional[dict]:
@@ -2675,11 +2774,23 @@ def write_signals_json(
     payload = {
         "date": scan_date,
         "generated": datetime.now().strftime("%H:%M"),
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
         "cap_count":   sum(1 for s in out_signals if s["type"] == "capitulation"),
         "pb_count":    sum(1 for s in out_signals if s["type"] == "pullback"),
         "pb126_count": sum(1 for s in out_signals if s["type"] == "pullback-sma126"),
         "err_count": sum(1 for r in results if r.get("error")),
         "skip_count": sum(1 for r in results if r.get("skipped")),
+        "data_integrity": {
+            "excluded_count": sum(
+                1 for r in results
+                if r.get("skipped") and str(r.get("reason", "")).startswith(("STALE_DATA", "SPLIT_ACTION"))
+            ),
+            "reasons": dict(Counter(
+                str(r.get("reason", "")).split(" — ", 1)[0]
+                for r in results
+                if r.get("skipped") and str(r.get("reason", "")).startswith(("STALE_DATA", "SPLIT_ACTION"))
+            )),
+        },
         "total_scanned": len(results),
         "signals": out_signals,
     }
@@ -3141,10 +3252,10 @@ def main() -> None:
         df, quote_meta = _overlay_intraday(ticker, df)
         last_close_date = pd.Timestamp(df.index[-1]).date()
 
-        if _is_stale_close(last_close_date, runtime_date):
+        if _is_stale_close(last_close_date, runtime_date, ticker):
             reason = (
                 f"STALE_DATA — last close {last_close_date.isoformat()} "
-                f"är >3 kalenderdagar före scan {runtime_date.isoformat()}"
+                f"är äldre än tillåten handelskalender-tolerans före scan {runtime_date.isoformat()}"
             )
             print(f"SKIPPED — {reason}")
             results.append({
@@ -3210,7 +3321,7 @@ def main() -> None:
             else:
                 proxy_df, _proxy_quote_meta = _overlay_intraday(proxy_ticker, proxy_df)
                 proxy_last_close = pd.Timestamp(proxy_df.index[-1]).date()
-                if _is_stale_close(proxy_last_close, runtime_date):
+                if _is_stale_close(proxy_last_close, runtime_date, proxy_ticker):
                     ticker_thresholds = dict(ticker_thresholds or {})
                     ticker_thresholds["fetch_fail"] = True
                     ticker_thresholds["volume_proxy_error"] = (
