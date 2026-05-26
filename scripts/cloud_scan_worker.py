@@ -584,7 +584,9 @@ def run_total_scanned(mode: str, latest: Any, stock_coverage: Any) -> int | None
         return int_or_none(stock_total)
     if mode == "all":
         return summed_counts(latest_total, stock_total)
-    return int_or_none(latest_total)
+    if mode == "etf":
+        return int_or_none(latest_total)
+    return None
 
 
 def run_error_count(mode: str, latest: Any, stock_coverage: Any) -> int | None:
@@ -594,7 +596,9 @@ def run_error_count(mode: str, latest: Any, stock_coverage: Any) -> int | None:
         return int_or_none(stock_errors)
     if mode == "all":
         return summed_counts(latest_errors, stock_errors)
-    return int_or_none(latest_errors)
+    if mode == "etf":
+        return int_or_none(latest_errors)
+    return None
 
 
 def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
@@ -639,6 +643,8 @@ def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
 
 def publish_keys_for_mode(mode: str | None) -> set[str]:
     publish_heavy = os.environ.get("SWING_TERMINAL_PUBLISH_HEAVY_ARTIFACTS") == "1"
+    if mode == "test-alert":
+        return set()
     if mode == "etf":
         keys = set(ETF_PUBLISH_KEYS)
     elif mode == "stocks":
@@ -697,6 +703,9 @@ def publish_run_summary(config: supabase_io.SupabaseConfig, run_summary: dict) -
 
 
 def publish_cloud_result(config: supabase_io.SupabaseConfig, run_summary: dict) -> str:
+    if run_summary.get("mode") == "test-alert":
+        publish_run_summary(config, run_summary)
+        return "recorded test-alert run without replacing scanner artifacts"
     if run_summary.get("status") == "OK" and int(run_summary.get("exit_code") or 0) == 0:
         publish_state(config, run_summary)
         publish_run_summary(config, run_summary)
@@ -717,7 +726,7 @@ def notify_latest() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Cloud runner for the swing terminal scanner")
-    parser.add_argument("--mode", choices=["all", "etf", "stocks"], default="all")
+    parser.add_argument("--mode", choices=["all", "etf", "stocks", "test-alert"], default="all")
     parser.add_argument("--portfolio", type=float, default=60_000)
     parser.add_argument("--date", default=None, help="Optional YYYY-MM-DD override for daily_scan.py")
     parser.add_argument("--daily-dry-run", action="store_true", help="Pass --dry-run to daily_scan.py")
@@ -738,7 +747,7 @@ def main() -> int:
     local_now = now_stockholm()
     runner_instance = os.environ.get("RENDER_INSTANCE_ID") or os.environ.get("GITHUB_RUN_ID") or "local"
     run_id = f"{local_now.strftime('%Y%m%dT%H%M%S')}-{runner_instance}"
-    if args.respect_market_hours and not args.force and not in_stockholm_scan_window(local_now):
+    if args.mode != "test-alert" and args.respect_market_hours and not args.force and not in_stockholm_scan_window(local_now):
         print(f"[cloud_scan_worker] outside scan window Europe/Stockholm: {local_now.isoformat(timespec='seconds')}")
         return 0
     dry_run_error = dry_run_safety_error(args)
@@ -747,6 +756,28 @@ def main() -> int:
         return DRY_RUN_MUTATION_EXIT_CODE
 
     config = None if args.no_upload else supabase_io.config_from_env(required=True)
+    if args.mode == "test-alert":
+        cmd = [
+            sys.executable,
+            str(ROOT / "scripts" / "run_scan_notify.py"),
+            "--test-signal-alert",
+            "--test-signal-alert-source",
+            run_id,
+        ]
+        if args.no_notify:
+            cmd.append("--test-signal-alert-dry-run")
+        exit_code = run(cmd)
+        status = "OK" if exit_code == 0 else "FAIL"
+        run_summary = summarize_run(run_id=run_id, mode=args.mode, status=status, exit_code=exit_code)
+        if config:
+            try:
+                publish_message = publish_cloud_result(config, run_summary)
+                print(f"[cloud_scan_worker] {publish_message}", flush=True)
+            except supabase_io.SupabaseError as exc:
+                print(f"[cloud_scan_worker] publish failed: {exc}", file=sys.stderr, flush=True)
+                return max(exit_code, 3)
+        return exit_code
+
     if config and not args.no_restore:
         restored = restore_state(config)
         print(f"[cloud_scan_worker] restored: {', '.join(restored) if restored else 'none'}", flush=True)

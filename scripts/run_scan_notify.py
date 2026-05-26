@@ -14,8 +14,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -37,7 +39,7 @@ DASHBOARD_URL = os.environ.get("SWING_TERMINAL_DASHBOARD_URL", _DEFAULT_DASHBOAR
 ALERT_DATE_RE = re.compile(r"daily-scan-(\d{4}-\d{2}-\d{2})|^\[(\d{4}-\d{2}-\d{2})T")
 
 
-def push_telegram(title: str, subtitle: str, msg: str) -> None:
+def push_telegram(title: str, subtitle: str, msg: str) -> bool:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if token and (token.startswith("PASTE_") or token.endswith("_HERE")):
@@ -45,7 +47,7 @@ def push_telegram(title: str, subtitle: str, msg: str) -> None:
     if chat_id and (chat_id.startswith("PASTE_") or chat_id.endswith("_HERE")):
         chat_id = ""
     if not token or not chat_id:
-        return
+        return False
     text = "\n".join(part for part in [title, subtitle, msg, DASHBOARD_URL] if part)
     data = urllib.parse.urlencode({
         "chat_id": chat_id,
@@ -53,17 +55,23 @@ def push_telegram(title: str, subtitle: str, msg: str) -> None:
         "disable_web_page_preview": "true",
     }).encode("utf-8")
     try:
-        urllib.request.urlopen(
+        raw = urllib.request.urlopen(
             f"https://api.telegram.org/bot{token}/sendMessage",
             data=data,
             timeout=10,
         ).read()
+        response = json.loads(raw.decode("utf-8"))
+        if bool(response.get("ok")):
+            print("[run_scan_notify.py] telegram sent: sendMessage", flush=True)
+            return True
+        print(f"[run_scan_notify.py] telegram failed: {response}", file=sys.stderr, flush=True)
     except Exception as exc:
         print(f"[run_scan_notify.py] telegram failed: {exc}", file=sys.stderr, flush=True)
+    return False
 
 
-def push(title: str, subtitle: str, msg: str, sound: str = "default") -> None:
-    push_telegram(title, subtitle, msg)
+def push(title: str, subtitle: str, msg: str, sound: str = "default") -> bool:
+    telegram_sent = push_telegram(title, subtitle, msg)
     notifier = shutil.which("terminal-notifier")
     if notifier:
         try:
@@ -85,12 +93,12 @@ def push(title: str, subtitle: str, msg: str, sound: str = "default") -> None:
                 ],
                 check=False,
             )
-            return
+            return telegram_sent
         except Exception:
             pass
     if not Path("/usr/bin/osascript").exists():
         print(f"[run_scan_notify.py] notify: {title} | {subtitle} | {msg}", flush=True)
-        return
+        return telegram_sent
     safe_msg = msg.replace('"', '\\"')
     safe_title = title.replace('"', '\\"')
     safe_sub = subtitle.replace('"', '\\"')
@@ -102,6 +110,7 @@ def push(title: str, subtitle: str, msg: str, sound: str = "default") -> None:
         ],
         check=False,
     )
+    return telegram_sent
 
 
 def load_notify_state() -> set[str]:
@@ -200,19 +209,20 @@ def stock_notify_kind(item: dict) -> str | None:
 
 
 def stock_notification_title(item: dict, kind: str) -> str:
+    prefix = "TEST — " if item.get("test_alert") else ""
     action = item.get("action")
     lifecycle = stock_lifecycle_state(item)
     if action == "LIVE_REVIEW":
-        return "New stock review signal"
+        return f"{prefix}New stock review signal"
     if action == "TRADE":
-        return "New stock trade signal"
+        return f"{prefix}New stock trade signal"
     if kind == "stock_thesis_down":
-        return "Stock thesis weakening"
+        return f"{prefix}Stock thesis weakening"
     if lifecycle == "UPGRADED":
-        return "Stock thesis improving"
+        return f"{prefix}Stock thesis improving"
     if lifecycle == "RETURNED":
-        return "Stock thesis returned"
-    return "New stock thesis"
+        return f"{prefix}Stock thesis returned"
+    return f"{prefix}New stock thesis"
 
 
 def notify_stock_journal(sent_events: set[str]) -> bool:
@@ -243,6 +253,7 @@ def notify_stock_journal(sent_events: set[str]) -> bool:
             thesis = item.get("thesis") or {}
             lifecycle = item.get("lifecycle") or {}
             message_parts = [
+                "TEST ALERT — no trade; notification pipeline proof only" if item.get("test_alert") else "",
                 f"{item.get('signal')}",
                 f"Action: {'Review - manual checks required' if is_review else 'Trade candidate' if item.get('action') == 'TRADE' else item.get('action')}",
                 f"Thesis: {thesis.get('stance', 'open read')} ({stock_thesis_probability(item)}%)",
@@ -270,7 +281,7 @@ def notify_stock_journal(sent_events: set[str]) -> bool:
             push(
                 stock_notification_title(item, kind),
                 f"{item.get('ticker')} — {item.get('name')}",
-                " | ".join(message_parts),
+                " | ".join(part for part in message_parts if part),
                 "Ping",
             )
             sent_events.add(active_id)
@@ -421,8 +432,118 @@ def notify_from_latest() -> int:
     return 0
 
 
+def build_test_signal_payload(source: str = "") -> tuple[dict, dict]:
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    source_text = source or os.environ.get("GITHUB_RUN_ID") or "manual"
+    latest_payload = {
+        "date": stamp[:10],
+        "cap_count": 0,
+        "pb_count": 0,
+        "pb126_count": 0,
+        "total_scanned": 0,
+        "signal_memory": {},
+        "signals": [],
+    }
+    stock_payload = {
+        "scan_date": stamp[:10],
+        "signals": [{
+            "key": f"TEST_SIGNAL_ALERT|{source_text}|{stamp}",
+            "ticker": "TEST",
+            "name": "Controlled Telegram path test",
+            "signal": "TEST SIGNAL — no trade",
+            "entry": "n/a",
+            "quality_score": "n/a",
+            "tier": "TEST_ONLY",
+            "action": "LIVE_REVIEW",
+            "active": True,
+            "first_seen_at": stamp,
+            "current_gate": "TEST_ONLY_NO_TRADE",
+            "prime_tier": "TEST_PIPELINE_ONLY",
+            "qt_label": "TEST",
+            "qt_phase": "TEST",
+            "qt_wait_label": "TEST",
+            "qt_confirmation": "TEST_NOTIFICATION_PATH",
+            "test_alert": True,
+            "thesis": {
+                "stance": "Pipeline proof only",
+                "subjective_probability": 0,
+                "wait_for": ["Ignore this alert for trading."],
+                "buy_if": ["Never — this is not a market signal."],
+            },
+            "lifecycle": {"state": "NEW", "label": "Test alert"},
+        }],
+    }
+    return latest_payload, stock_payload
+
+
+def notify_test_signal_alert(*, dry_run: bool = False, source: str = "") -> int:
+    """Send one controlled test signal through notify_from_latest without mutating live scanner files."""
+    global JSON_PATH, STOCK_JOURNAL_PATH, NOTIFY_STATE, ALERT, push
+
+    old_paths = (JSON_PATH, STOCK_JOURNAL_PATH, NOTIFY_STATE, ALERT)
+    original_push = push
+    old_force_quiet = os.environ.get("FORCE_QUIET_NOTIFY")
+    telegram_results: list[bool] = []
+    with tempfile.TemporaryDirectory(prefix="swing-test-alert-") as tmp:
+        tmp_path = Path(tmp)
+        JSON_PATH = tmp_path / "latest-signals.json"
+        STOCK_JOURNAL_PATH = tmp_path / "stock-signal-journal.json"
+        NOTIFY_STATE = tmp_path / "signal-notify-state.json"
+        ALERT = tmp_path / "SCAN_ALERT.txt"
+        latest_payload, stock_payload = build_test_signal_payload(source)
+        JSON_PATH.write_text(json.dumps(latest_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        STOCK_JOURNAL_PATH.write_text(json.dumps(stock_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+        if dry_run:
+            def capture_push(title: str, subtitle: str, msg: str, sound: str = "default") -> bool:
+                print(f"[run_scan_notify.py] test-alert dry-run: {title} | {subtitle} | {msg} | sound={sound}", flush=True)
+                telegram_results.append(True)
+                return True
+
+            push = capture_push
+        else:
+            def capture_push(title: str, subtitle: str, msg: str, sound: str = "default") -> bool:
+                sent = bool(original_push(title, subtitle, msg, sound))
+                telegram_results.append(sent)
+                return sent
+
+            push = capture_push
+
+        try:
+            os.environ["FORCE_QUIET_NOTIFY"] = "1"
+            rc = notify_from_latest()
+        finally:
+            if old_force_quiet is None:
+                os.environ.pop("FORCE_QUIET_NOTIFY", None)
+            else:
+                os.environ["FORCE_QUIET_NOTIFY"] = old_force_quiet
+            JSON_PATH, STOCK_JOURNAL_PATH, NOTIFY_STATE, ALERT = old_paths
+            push = original_push
+
+    if rc != 0:
+        return rc
+    if not dry_run and not any(telegram_results):
+        print("[run_scan_notify.py] test-alert failed: Telegram send was not confirmed", file=sys.stderr, flush=True)
+        return 2
+    return 0
+
+
+def cli_value(flag: str, argv: list[str]) -> str:
+    if flag not in argv:
+        return ""
+    index = argv.index(flag)
+    if index + 1 >= len(argv):
+        return ""
+    return argv[index + 1]
+
+
 def main() -> int:
     os.chdir(ROOT)
+    if "--test-signal-alert" in sys.argv:
+        return notify_test_signal_alert(
+            dry_run="--test-signal-alert-dry-run" in sys.argv,
+            source=cli_value("--test-signal-alert-source", sys.argv),
+        )
     print("[run_scan_notify.py] START", flush=True)
     proc = subprocess.run([sys.executable, str(SCAN), *sys.argv[1:]], cwd=ROOT)
     print(f"[run_scan_notify.py] daily_scan exit={proc.returncode}", flush=True)

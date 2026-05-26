@@ -488,6 +488,22 @@ def test_publish_cloud_result_keeps_artifacts_on_failure(monkeypatch):
     assert "without replacing scanner artifacts" in message
 
 
+def test_publish_cloud_result_records_test_alert_without_replacing_artifacts(monkeypatch):
+    config = cloud_scan_worker.supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+    calls = []
+
+    monkeypatch.setattr(cloud_scan_worker, "publish_state", lambda config, summary: calls.append("state"))
+    monkeypatch.setattr(cloud_scan_worker, "publish_run_summary", lambda config, summary: calls.append("summary"))
+
+    message = cloud_scan_worker.publish_cloud_result(
+        config,
+        {"run_id": "test-alert", "mode": "test-alert", "status": "OK", "exit_code": 0},
+    )
+
+    assert calls == ["summary"]
+    assert "test-alert" in message
+
+
 def test_publish_keys_are_mode_specific():
     assert "latest-signals" in cloud_scan_worker.publish_keys_for_mode("etf")
     assert "scan-data-js" in cloud_scan_worker.publish_keys_for_mode("etf")
@@ -497,6 +513,12 @@ def test_publish_keys_are_mode_specific():
     assert "stock-current-coverage" in cloud_scan_worker.publish_keys_for_mode("stocks")
     assert "stock-data-js" in cloud_scan_worker.publish_keys_for_mode("stocks")
     assert "latest-signals" not in cloud_scan_worker.publish_keys_for_mode("stocks")
+    assert cloud_scan_worker.publish_keys_for_mode("test-alert") == set()
+
+
+def test_test_alert_summary_does_not_reuse_stale_scan_counts():
+    assert cloud_scan_worker.run_total_scanned("test-alert", {"total_scanned": 44}, {"stocks": 108}) is None
+    assert cloud_scan_worker.run_error_count("test-alert", {"err_count": 0}, {"fail": 0}) is None
 
 
 def test_publish_cloud_result_publishes_artifacts_on_success(monkeypatch):

@@ -111,6 +111,61 @@ def test_live_review_stock_notification_is_labeled_as_review(monkeypatch, tmp_pa
     assert "QT: QT_SUPPORT / REPAIRING / LOW_WAIT_VALUE / FRAMEWORK_VALID_ENOUGH" in sent[0][2]
 
 
+def test_test_alert_stock_notification_is_clearly_marked(monkeypatch, tmp_path):
+    latest_path = tmp_path / "latest-signals.json"
+    latest_path.write_text(json.dumps({
+        "date": "2026-05-26",
+        "cap_count": 0,
+        "pb_count": 0,
+        "pb126_count": 0,
+        "total_scanned": 0,
+        "signal_memory": {},
+        "signals": [],
+    }))
+    stock_path = tmp_path / "stock-signal-journal.json"
+    stock_path.write_text(json.dumps({
+        "signals": [{
+            "key": "TEST_SIGNAL_ALERT|unit",
+            "ticker": "TEST",
+            "name": "Controlled Telegram path test",
+            "signal": "TEST SIGNAL — no trade",
+            "entry": "n/a",
+            "quality_score": "n/a",
+            "tier": "TEST_ONLY",
+            "action": "LIVE_REVIEW",
+            "active": True,
+            "first_seen_at": "2026-05-26T20:00:00+00:00",
+            "current_gate": "TEST_ONLY_NO_TRADE",
+            "prime_tier": "TEST_PIPELINE_ONLY",
+            "test_alert": True,
+        }],
+    }))
+    state_path = tmp_path / "signal-notify-state.json"
+
+    sent = []
+    monkeypatch.setattr(run_scan_notify, "JSON_PATH", latest_path)
+    monkeypatch.setattr(run_scan_notify, "STOCK_JOURNAL_PATH", stock_path)
+    monkeypatch.setattr(run_scan_notify, "NOTIFY_STATE", state_path)
+    monkeypatch.setattr(run_scan_notify, "ALERT", tmp_path / "SCAN_ALERT.txt")
+    monkeypatch.setattr(run_scan_notify, "push", lambda *args, **kwargs: sent.append(args) or True)
+
+    assert run_scan_notify.notify_from_latest() == 0
+
+    assert sent[0][0] == "TEST — New stock review signal"
+    assert "TEST ALERT — no trade; notification pipeline proof only" in sent[0][2]
+    assert "TEST SIGNAL — no trade" in sent[0][2]
+    assert "Gate: TEST_ONLY_NO_TRADE" in sent[0][2]
+
+
+def test_notify_test_signal_alert_dry_run_uses_temp_state(capsys):
+    assert run_scan_notify.notify_test_signal_alert(dry_run=True, source="unit") == 0
+
+    out = capsys.readouterr().out
+    assert "test-alert dry-run" in out
+    assert "TEST — New stock review signal" in out
+    assert "TEST ALERT — no trade" in out
+
+
 def test_wait_signal_stock_thesis_notification_uses_lifecycle(monkeypatch, tmp_path):
     latest_path = tmp_path / "latest-signals.json"
     latest_path.write_text(json.dumps({
