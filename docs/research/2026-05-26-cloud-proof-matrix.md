@@ -185,3 +185,42 @@ Still not proven after this update:
 
 - Managed container/VM provider runtime outside GitHub Actions.
 - Scanner-generated Telegram message from a real new signal; Telegram send was proven by readiness, but not by a live signal event in this run.
+
+## Final push/CI proof update — 2026-05-26 22:32–22:49 Europe/Stockholm
+
+Verified after pushing the full MLPB script set to `main`:
+
+- `Swing Terminal CI` initially failed because the workflow compiled `scripts/mlpb_final_falsification_research.py` and `scripts/mlpb_prime_framework_research.py`, but those files had not been committed.
+- The missing scripts were added to `main`.
+- Local verification after adding them:
+  - `python3 -m py_compile` over the CI cloud-script set passed.
+  - focused tests passed: `48 passed in 0.87s`.
+  - `python3 scripts/secret_scan.py` passed: `secret_scan: ok (94 files)`.
+- GitHub Actions after the fix:
+  - `Swing Terminal CI` run `26473459494`: success
+  - `Swing Terminal Safety` run `26473459472`: success
+- Final `main` stock workflow dispatch run `26473499247`: success.
+- Run `26473499247` evidence:
+  - restored `mlpb-final-events`
+  - stock coverage `ok=108 fail=0 stocks=108 current=88`
+  - MLPB final event set fresh `0.1h < 18h`
+  - MLPB latest cache coverage `31/31 fetched=0 failed=0`
+  - MLPB gate wrote current gate JSON
+  - state published to Supabase
+- Supabase after that run:
+  - latest stock run `20260526T223323-26473499247`, status `OK`, scanned `108`, errors `0`
+  - `mlpb-current-gate` generated at `2026-05-26T20:38:19`
+  - MLPB latest coverage `31/31` tickers and `68/68` candidate rows with latest features
+  - labels: `24 NO_TRADE`, `38 WATCH_PULLBACK`, `6 EVENT_BLOCKED`
+  - Prime tiers: `24 FAILED_STRUCTURE`, `30 B_WATCH`, `8 A_WATCH`, `6 EVENT_BLOCKED`
+- Final strict chain command `python3 scripts/cloud_chain_status.py --strict` exited `0` and reported:
+  - ETF fresh age `41m/50m`, scanned `44`
+  - stocks fresh age `11m/2h10m`, scanned `108`
+  - Telegram ready
+  - latest Cloud Scanner, Cloud Watchdog, CI, and Safety workflows green
+  - `Action required: no`
+
+Still not proven after this final update:
+
+- Managed container/VM provider runtime outside GitHub Actions.
+- Scanner-generated Telegram message from a real new signal; Telegram transport works, but no new live scanner signal was produced in the proof run.
