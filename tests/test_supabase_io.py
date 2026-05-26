@@ -69,6 +69,35 @@ def test_upload_json_file_builds_artifact_row(monkeypatch, tmp_path):
     assert captured["rows"][0]["payload"]["date"] == "2026-05-21"
 
 
+def test_large_json_payload_compresses_and_roundtrips(monkeypatch, tmp_path):
+    monkeypatch.setenv("SUPABASE_COMPRESS_JSON_BYTES", "1")
+    payload = {"items": [{"ticker": "ICGA", "score": 1.2, "bad": math.nan}], "path": tmp_path / "artifact.json"}
+
+    stored = supabase_io.maybe_compress_json_payload(payload)
+
+    assert stored[supabase_io.COMPRESSED_PAYLOAD_MARKER] == supabase_io.COMPRESSED_JSON_ENCODING
+    assert stored["raw_bytes"] > 0
+    assert stored["compressed_bytes"] > 0
+    assert supabase_io.decode_json_payload(stored) == {
+        "items": [{"ticker": "ICGA", "score": 1.2, "bad": None}],
+        "path": str(tmp_path / "artifact.json"),
+    }
+
+
+def test_download_json_artifact_decodes_compressed_payload(monkeypatch):
+    monkeypatch.setenv("SUPABASE_COMPRESS_JSON_BYTES", "1")
+    compressed = supabase_io.maybe_compress_json_payload({"signals": [{"ticker": "EIDO"}]})
+    config = supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+
+    monkeypatch.setattr(
+        supabase_io,
+        "select_rows",
+        lambda config, table, filters, select="*", limit=None: [{"payload": compressed}],
+    )
+
+    assert supabase_io.download_json_artifact(config, "latest-signals") == {"signals": [{"ticker": "EIDO"}]}
+
+
 def test_text_artifact_roundtrip_helpers(monkeypatch, tmp_path):
     uploaded = {}
 
@@ -126,3 +155,31 @@ def test_request_json_sanitizes_nonfinite_numbers(monkeypatch):
     assert json.loads(captured["body"]) == {"payload": {"qt_z": None, "ok": 1.0, "bad": None}}
     assert "NaN" not in captured["body"]
     assert "Infinity" not in captured["body"]
+
+
+def test_request_json_retries_transient_timeout(monkeypatch):
+    calls = {"count": 0}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'[{"ok": true}]'
+
+    def fake_urlopen(req, timeout=30):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise TimeoutError("slow")
+        return FakeResponse()
+
+    monkeypatch.setenv("SUPABASE_HTTP_ATTEMPTS", "2")
+    monkeypatch.setattr(supabase_io.time_module, "sleep", lambda seconds: None)
+    monkeypatch.setattr(supabase_io.urllib.request, "urlopen", fake_urlopen)
+    config = supabase_io.SupabaseConfig(url="https://example.supabase.co", key="secret")
+
+    assert supabase_io.request_json(config, "GET", "scanner_artifacts") == [{"ok": True}]
+    assert calls["count"] == 2

@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
@@ -146,12 +147,64 @@ def test_should_use_cached_mlpb_events_when_fresh(tmp_path, monkeypatch):
 
 
 def test_run_mlpb_stock_gate_skips_when_optional_scripts_missing(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(cloud_scan_worker, "MLPB_RESEARCH_SCRIPT", tmp_path / "missing_research.py")
     monkeypatch.setattr(cloud_scan_worker, "MLPB_GATE_SCRIPT", tmp_path / "missing_gate.py")
+    monkeypatch.delenv("SWING_TERMINAL_REQUIRE_MLPB_GATE", raising=False)
     monkeypatch.setattr(cloud_scan_worker, "run", lambda cmd: (_ for _ in ()).throw(AssertionError("run should not be called")))
 
     assert cloud_scan_worker.run_mlpb_stock_gate() == 0
     assert "optional MLPB gate skipped" in capsys.readouterr().out
+
+
+def test_run_mlpb_stock_gate_skips_missing_events_in_cloud_without_failing(monkeypatch, tmp_path, capsys):
+    gate = tmp_path / "mlpb_current_trade_gate.py"
+    gate.write_text("print('gate')\n", encoding="utf-8")
+
+    monkeypatch.setattr(cloud_scan_worker, "MLPB_GATE_SCRIPT", gate)
+    monkeypatch.setattr(cloud_scan_worker, "MLPB_EVENTS_PATH", tmp_path / "missing_events.json")
+    monkeypatch.setenv("SWING_TERMINAL_CLOUD_RUN", "1")
+    monkeypatch.delenv("SWING_TERMINAL_RUN_MLPB_RESEARCH", raising=False)
+    monkeypatch.delenv("SWING_TERMINAL_REQUIRE_MLPB_GATE", raising=False)
+    monkeypatch.setattr(cloud_scan_worker, "run", lambda cmd: (_ for _ in ()).throw(AssertionError("run should not be called")))
+
+    assert cloud_scan_worker.run_mlpb_stock_gate() == 0
+    captured = capsys.readouterr()
+    assert "MLPB event refresh skipped" in captured.out
+    assert "MLPB gate skipped: missing final event set" in captured.err
+
+
+def test_run_mlpb_stock_gate_can_require_cached_events(monkeypatch, tmp_path):
+    gate = tmp_path / "mlpb_current_trade_gate.py"
+    gate.write_text("print('gate')\n", encoding="utf-8")
+
+    monkeypatch.setattr(cloud_scan_worker, "MLPB_GATE_SCRIPT", gate)
+    monkeypatch.setattr(cloud_scan_worker, "MLPB_EVENTS_PATH", tmp_path / "missing_events.json")
+    monkeypatch.setenv("SWING_TERMINAL_CLOUD_RUN", "1")
+    monkeypatch.setenv("SWING_TERMINAL_REQUIRE_MLPB_GATE", "1")
+    monkeypatch.setattr(cloud_scan_worker, "run", lambda cmd: 0)
+
+    assert cloud_scan_worker.run_mlpb_stock_gate() == 1
+
+
+def test_run_mlpb_stock_gate_runs_current_gate_when_cached_events_exist(monkeypatch, tmp_path):
+    gate = tmp_path / "mlpb_current_trade_gate.py"
+    gate.write_text("print('gate')\n", encoding="utf-8")
+    events = tmp_path / "mlpb_final_falsification_events.json"
+    events.write_text(
+        '{"events": [{"visual_grade": "CLEAN", "qt_label": "QT_SUPPORT", "qt_phase": "REPAIRING", "qt_wait_label": "LOW_WAIT_VALUE"}]}',
+        encoding="utf-8",
+    )
+    now_ts = datetime.now(timezone.utc).timestamp()
+    os.utime(events, (now_ts, now_ts))
+    calls = []
+
+    monkeypatch.setattr(cloud_scan_worker, "MLPB_GATE_SCRIPT", gate)
+    monkeypatch.setattr(cloud_scan_worker, "MLPB_EVENTS_PATH", events)
+    monkeypatch.setenv("SWING_TERMINAL_CLOUD_RUN", "1")
+    monkeypatch.delenv("SWING_TERMINAL_RUN_MLPB_RESEARCH", raising=False)
+    monkeypatch.setattr(cloud_scan_worker, "run", lambda cmd: calls.append(cmd) or 0)
+
+    assert cloud_scan_worker.run_mlpb_stock_gate() == 0
+    assert calls == [[sys.executable, str(gate)]]
 
 
 def test_fresh_scan_skip_reason_skips_recent_ok_mode(monkeypatch):
@@ -329,6 +382,21 @@ def test_validate_etf_coverage_returns_failure_for_bad_payload(tmp_path):
     path.write_text('{"total_scanned": 44, "err_count": 20, "skip_count": 0}', encoding="utf-8")
 
     assert cloud_scan_worker.validate_etf_coverage(path) == cloud_scan_worker.ETF_COVERAGE_FAIL_EXIT_CODE
+
+
+def test_daily_dry_run_safety_requires_no_upload_and_no_notify():
+    args = SimpleNamespace(daily_dry_run=True, no_upload=False, no_notify=False)
+
+    error = cloud_scan_worker.dry_run_safety_error(args)
+
+    assert "--no-upload" in error
+    assert "--no-notify" in error
+
+
+def test_daily_dry_run_safety_allows_no_mutation_smoke():
+    args = SimpleNamespace(daily_dry_run=True, no_upload=True, no_notify=True)
+
+    assert cloud_scan_worker.dry_run_safety_error(args) is None
 
 
 def test_summarize_run_records_quality_failure_reason(monkeypatch):

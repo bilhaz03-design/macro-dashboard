@@ -8,9 +8,13 @@ safer publishable-key + ingest-token path.
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
+import socket
+import time as time_module
+import zlib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,6 +26,11 @@ from typing import Any
 
 class SupabaseError(RuntimeError):
     """Raised when Supabase returns a non-2xx response."""
+
+
+COMPRESSED_JSON_ENCODING = "zlib+base64+json"
+COMPRESSED_PAYLOAD_MARKER = "__swing_terminal_encoding"
+DEFAULT_COMPRESS_JSON_BYTES = 5_000_000
 
 
 @dataclass(frozen=True)
@@ -98,6 +107,58 @@ def sanitize_json_value(value: Any) -> Any:
     return value
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _should_retry_http(exc: urllib.error.HTTPError) -> bool:
+    return exc.code == 429 or 500 <= exc.code <= 599
+
+
+def _compress_threshold_bytes() -> int:
+    raw = os.environ.get("SUPABASE_COMPRESS_JSON_BYTES")
+    if raw is None:
+        return DEFAULT_COMPRESS_JSON_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_COMPRESS_JSON_BYTES
+    return value if value > 0 else DEFAULT_COMPRESS_JSON_BYTES
+
+
+def maybe_compress_json_payload(payload: Any) -> Any:
+    """Compress large JSON artifacts before storing them in scanner_artifacts."""
+    safe_payload = sanitize_json_value(payload)
+    raw = json.dumps(safe_payload, ensure_ascii=False, default=_json_default, allow_nan=False).encode("utf-8")
+    if len(raw) < _compress_threshold_bytes():
+        return safe_payload
+    compressed = zlib.compress(raw, level=6)
+    return {
+        COMPRESSED_PAYLOAD_MARKER: COMPRESSED_JSON_ENCODING,
+        "raw_bytes": len(raw),
+        "compressed_bytes": len(compressed),
+        "payload_b64": base64.b64encode(compressed).decode("ascii"),
+    }
+
+
+def decode_json_payload(payload: Any) -> Any:
+    if not (
+        isinstance(payload, dict)
+        and payload.get(COMPRESSED_PAYLOAD_MARKER) == COMPRESSED_JSON_ENCODING
+        and isinstance(payload.get("payload_b64"), str)
+    ):
+        return payload
+    raw = zlib.decompress(base64.b64decode(payload["payload_b64"].encode("ascii")))
+    return json.loads(raw.decode("utf-8"))
+
+
 def request_json(
     config: SupabaseConfig,
     method: str,
@@ -127,14 +188,25 @@ def request_json(
         headers["Prefer"] = prefer
 
     req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            raw = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace")
-        raise SupabaseError(f"Supabase {method} {path} failed: {exc.code} {error_body}") from exc
-    except urllib.error.URLError as exc:
-        raise SupabaseError(f"Supabase {method} {path} failed: {exc.reason}") from exc
+    timeout_seconds = _positive_int_env("SUPABASE_HTTP_TIMEOUT_SECONDS", 90)
+    max_attempts = _positive_int_env("SUPABASE_HTTP_ATTEMPTS", 3)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
+                raw = response.read().decode("utf-8")
+            break
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            if attempt < max_attempts and _should_retry_http(exc):
+                time_module.sleep(min(2 ** (attempt - 1), 8))
+                continue
+            raise SupabaseError(f"Supabase {method} {path} failed: {exc.code} {error_body}") from exc
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+            if attempt < max_attempts:
+                time_module.sleep(min(2 ** (attempt - 1), 8))
+                continue
+            reason = getattr(exc, "reason", exc)
+            raise SupabaseError(f"Supabase {method} {path} failed: {reason}") from exc
 
     if not raw:
         return None
@@ -191,6 +263,7 @@ def upload_json_artifact(
     source_path: str | None = None,
     scan_date: str | None = None,
 ) -> None:
+    stored_payload = maybe_compress_json_payload(payload)
     upsert_rows(
         config,
         "scanner_artifacts",
@@ -200,7 +273,7 @@ def upload_json_artifact(
             "scan_date": scan_date,
             "updated_at": utc_now(),
             "source_path": source_path,
-            "payload": payload,
+            "payload": stored_payload,
         }],
         on_conflict="artifact_key",
     )
@@ -278,7 +351,7 @@ def download_json_artifact(config: SupabaseConfig, artifact_key: str) -> Any | N
     )
     if not rows:
         return None
-    return rows[0].get("payload")
+    return decode_json_payload(rows[0].get("payload"))
 
 
 def download_text_artifact(config: SupabaseConfig, artifact_key: str) -> str | None:

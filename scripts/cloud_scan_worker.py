@@ -76,9 +76,15 @@ STOCK_PUBLISH_KEYS = {
     "live-trades",
     "execution-map",
     "stock-current-coverage",
-    "mlpb-final-events",
     "mlpb-current-gate",
     "stock-data-js",
+}
+
+HEAVY_PUBLISH_KEYS = {
+    # This research artifact can be tens of MB. It is useful locally, but it is
+    # not needed for mobile alerts/terminal state and can exceed Supabase REST
+    # write timing on free/self-owned runs.
+    "mlpb-final-events",
 }
 
 FRESH_SCAN_DEDUPE_WINDOWS = {
@@ -90,12 +96,15 @@ STOCK_COVERAGE_PATH = DATA_DIR / "stock_framework_current_scan_coverage.json"
 STOCK_COVERAGE_FAIL_EXIT_CODE = 4
 ETF_SIGNALS_PATH = DATA_DIR / "latest-signals.json"
 ETF_COVERAGE_FAIL_EXIT_CODE = 5
+DRY_RUN_MUTATION_EXIT_CODE = 6
 MLPB_EVENTS_PATH = DATA_DIR / "mlpb_final_falsification_events.json"
 MLPB_GATE_PATH = DATA_DIR / "mlpb_current_trade_gate.json"
 MLPB_RESEARCH_SCRIPT = ROOT / "scripts" / "mlpb_final_falsification_research.py"
 MLPB_GATE_SCRIPT = ROOT / "scripts" / "mlpb_current_trade_gate.py"
 MLPB_REFRESH_HOURS_ENV = "SWING_TERMINAL_MLPB_REFRESH_HOURS"
 MLPB_DEFAULT_REFRESH_HOURS = 18
+MLPB_RESEARCH_ENABLED_ENV = "SWING_TERMINAL_RUN_MLPB_RESEARCH"
+MLPB_REQUIRE_GATE_ENV = "SWING_TERMINAL_REQUIRE_MLPB_GATE"
 
 
 def now_stockholm() -> datetime:
@@ -151,6 +160,13 @@ def parse_positive_int_env(name: str, default: int) -> int:
     except ValueError:
         return default
     return value if value > 0 else default
+
+
+def parse_bool_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def parse_ratio_env(name: str, default: float) -> float:
@@ -301,9 +317,25 @@ def validate_etf_coverage(path: Path = ETF_SIGNALS_PATH) -> int:
     return 0
 
 
+def dry_run_safety_error(args: argparse.Namespace) -> str | None:
+    """Dry-run is smoke-only; it must not publish or notify from stale state."""
+    if not getattr(args, "daily_dry_run", False):
+        return None
+    unsafe = []
+    if not getattr(args, "no_upload", False):
+        unsafe.append("--no-upload")
+    if not getattr(args, "no_notify", False):
+        unsafe.append("--no-notify")
+    if unsafe:
+        return "daily dry-run is smoke-only; rerun with " + " and ".join(unsafe)
+    return None
+
+
 def failure_kind_for_exit_code(exit_code: int) -> str | None:
     if exit_code == 0:
         return None
+    if exit_code == DRY_RUN_MUTATION_EXIT_CODE:
+        return "unsafe_dry_run_mutation"
     if exit_code == ETF_COVERAGE_FAIL_EXIT_CODE:
         return "etf_coverage_quality_gate"
     if exit_code == STOCK_COVERAGE_FAIL_EXIT_CODE:
@@ -376,28 +408,48 @@ def should_refresh_mlpb_events(
     return False, f"MLPB event set fresh ({age_hours:.1f}h < {refresh_hours}h)"
 
 
+def mlpb_research_enabled() -> bool:
+    """Default to no heavy MLPB research in managed/cloud runs."""
+    is_cloud = os.environ.get("GITHUB_ACTIONS") == "true" or os.environ.get("SWING_TERMINAL_CLOUD_RUN") == "1"
+    return parse_bool_env(MLPB_RESEARCH_ENABLED_ENV, default=not is_cloud)
+
+
+def mlpb_gate_required() -> bool:
+    return parse_bool_env(MLPB_REQUIRE_GATE_ENV, default=False)
+
+
+def _relative_or_absolute(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def run_mlpb_stock_gate() -> int:
-    if not MLPB_RESEARCH_SCRIPT.exists() or not MLPB_GATE_SCRIPT.exists():
-        missing = []
-        for path in (MLPB_RESEARCH_SCRIPT, MLPB_GATE_SCRIPT):
-            if path.exists():
-                continue
-            try:
-                missing.append(str(path.relative_to(ROOT)))
-            except ValueError:
-                missing.append(str(path))
+    if not MLPB_GATE_SCRIPT.exists():
         print(
-            "[cloud_scan_worker] optional MLPB gate skipped: missing scripts "
-            f"{', '.join(missing)}",
+            "[cloud_scan_worker] optional MLPB gate skipped: missing gate script "
+            f"{_relative_or_absolute(MLPB_GATE_SCRIPT)}",
             flush=True,
         )
-        return 0
+        return 1 if mlpb_gate_required() else 0
 
     exit_code = 0
-    refresh, reason = should_refresh_mlpb_events()
+    refresh, reason = should_refresh_mlpb_events(MLPB_EVENTS_PATH)
     if refresh:
-        print(f"[cloud_scan_worker] refreshing MLPB final events: {reason}", flush=True)
-        exit_code = max(exit_code, run([sys.executable, str(MLPB_RESEARCH_SCRIPT)]))
+        if mlpb_research_enabled() and MLPB_RESEARCH_SCRIPT.exists():
+            print(f"[cloud_scan_worker] refreshing MLPB final events: {reason}", flush=True)
+            exit_code = max(exit_code, run([sys.executable, str(MLPB_RESEARCH_SCRIPT)]))
+        else:
+            disabled_reason = (
+                f"missing research script {_relative_or_absolute(MLPB_RESEARCH_SCRIPT)}"
+                if mlpb_research_enabled()
+                else f"{MLPB_RESEARCH_ENABLED_ENV}=0/cloud default"
+            )
+            print(
+                f"[cloud_scan_worker] MLPB event refresh skipped: {reason}; {disabled_reason}",
+                flush=True,
+            )
     else:
         print(f"[cloud_scan_worker] using cached MLPB final events: {reason}", flush=True)
 
@@ -405,7 +457,8 @@ def run_mlpb_stock_gate() -> int:
         exit_code = max(exit_code, run([sys.executable, str(MLPB_GATE_SCRIPT)]))
     else:
         print("[cloud_scan_worker] MLPB gate skipped: missing final event set", file=sys.stderr, flush=True)
-        exit_code = max(exit_code, 1)
+        if mlpb_gate_required():
+            exit_code = max(exit_code, 1)
     return exit_code
 
 
@@ -585,11 +638,16 @@ def summarize_run(run_id: str, mode: str, status: str, exit_code: int) -> dict:
 
 
 def publish_keys_for_mode(mode: str | None) -> set[str]:
+    publish_heavy = os.environ.get("SWING_TERMINAL_PUBLISH_HEAVY_ARTIFACTS") == "1"
     if mode == "etf":
-        return set(ETF_PUBLISH_KEYS)
-    if mode == "stocks":
-        return set(STOCK_PUBLISH_KEYS)
-    return set(PUBLISHED_JSON_ARTIFACTS) | set(PUBLISHED_TEXT_ARTIFACTS)
+        keys = set(ETF_PUBLISH_KEYS)
+    elif mode == "stocks":
+        keys = set(STOCK_PUBLISH_KEYS)
+    else:
+        keys = set(PUBLISHED_JSON_ARTIFACTS) | set(PUBLISHED_TEXT_ARTIFACTS)
+    if not publish_heavy:
+        keys -= HEAVY_PUBLISH_KEYS
+    return keys
 
 
 def publish_state(config: supabase_io.SupabaseConfig, run_summary: dict) -> None:
@@ -683,6 +741,10 @@ def main() -> int:
     if args.respect_market_hours and not args.force and not in_stockholm_scan_window(local_now):
         print(f"[cloud_scan_worker] outside scan window Europe/Stockholm: {local_now.isoformat(timespec='seconds')}")
         return 0
+    dry_run_error = dry_run_safety_error(args)
+    if dry_run_error:
+        print(f"[cloud_scan_worker] refusing unsafe dry-run: {dry_run_error}", file=sys.stderr, flush=True)
+        return DRY_RUN_MUTATION_EXIT_CODE
 
     config = None if args.no_upload else supabase_io.config_from_env(required=True)
     if config and not args.no_restore:
@@ -706,7 +768,10 @@ def main() -> int:
         if args.daily_dry_run:
             cmd.append("--dry-run")
         exit_code = max(exit_code, run(cmd))
-        exit_code = max(exit_code, validate_etf_coverage())
+        if args.daily_dry_run:
+            print("[cloud_scan_worker] ETF coverage gate skipped for daily dry-run smoke", flush=True)
+        else:
+            exit_code = max(exit_code, validate_etf_coverage())
 
     if args.mode in {"all", "stocks"} and not args.daily_dry_run:
         exit_code = max(exit_code, run([sys.executable, str(ROOT / "scripts" / "stock_current_scan.py")]))
